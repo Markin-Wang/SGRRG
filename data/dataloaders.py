@@ -2,17 +2,18 @@ import torch
 import numpy as np
 from torchvision import transforms
 from torch.utils.data import DataLoader
-from .datasets import IuxrayMultiImageDataset, MimiccxrSingleImageDataset, IuxrayMultiImageClsDataset, \
-    MimiccxrSingleImageClsDataset, IuxrayMultiImageDatasetArrow, MIMICMultiImageDatasetArrow
+from data import *
 from torch.utils.data import DistributedSampler
 import torch.distributed as dist
 from modules.balanced_sampler import MultilabelBalancedRandomSampler
 import random
 from collections import defaultdict
-#from mmcv.transforms import LoadImageFromFile, Resize,CenterCrop,Normalize,ImageToTensor,RandomCrop
+# from mmcv.transforms import LoadImageFromFile, Resize,CenterCrop,Normalize,ImageToTensor,RandomCrop
 import torchvision
+
 torchvision.disable_beta_transforms_warning()
 import torchvision.transforms.v2 as transforms
+
 
 class R2DataLoader(DataLoader):
     def __init__(self, config, tokenizer, split, shuffle, vis=False):
@@ -58,36 +59,54 @@ class R2DataLoader(DataLoader):
                 #         ImageToTensor(),
                 #     ]
                 # else:
-                self.transform = transforms.Compose([
+                self.transform = {'common_aug': transforms.Compose([
                     transforms.Resize((config['image_size'], config['image_size'])),
                     transforms.RandomRotation(config['rotate_degree']),
                     # transforms.RandomCrop(224),
-                    transforms.ToTensor(), # to [0,1]
-                    transforms.Normalize((0.485, 0.456, 0.406),
-                                         (0.229, 0.224, 0.225))])
-
-
+                    # transforms.ToImageTensor(),  # note this does not scale the image
+                    # transforms.ConvertImageDtype(torch.float32),
+                    # transforms.Normalize((123.675, 116.28, 103.53),
+                    #                      (58.395, 57.12, 57.375))
+                ]),
+                    'norm_to_tensor': transforms.Compose([
+                        transforms.ToImageTensor(),  # note this does not scale the image
+                        transforms.ConvertImageDtype(torch.float32), # this operation scale the value from 255 to [0,1]
+                        transforms.Normalize((0.485, 0.456, 0.406),
+                                             (0.229, 0.224, 0.225))
+                    ]),
+                }
         else:
-            self.transform = transforms.Compose([
+            self.transform = {'common_aug': transforms.Compose([
                 transforms.Resize((config['image_size'], config['image_size'])),
-                transforms.ToTensor(),
-                transforms.Normalize((0.485, 0.456, 0.406),
-                                     (0.229, 0.224, 0.225))])
+                # transforms.RandomCrop(224),
+                # transforms.ToImageTensor(),  # note this does not scale the image
+                # transforms.ConvertImageDtype(torch.float32),
+                # transforms.Normalize((123.675, 116.28, 103.53),
+                #                      (58.395, 57.12, 57.375))
+            ]),
+                'norm_to_tensor': transforms.Compose([
+                    transforms.ToImageTensor(),  # note this does not scale the image
+                    transforms.ConvertImageDtype(torch.float32), # this operation scale the value from 255 to [0,1]
+                    transforms.Normalize((0.485, 0.456, 0.406),
+                                         (0.229, 0.224, 0.225))
+                ]),
+            }
+
             # self.transform = [
             #     Resize(scale=(config['image_size'], config['image_size'])),
             #     Normalize(),
             #     ImageToTensor(),
             # ]
 
-
         if self.dataset_name == 'iu_xray' and not self.cls:
             self.dataset = IuxrayMultiImageDatasetArrow(config=self.config, tokenizer=tokenizer, split=self.split,
                                                         transform=self.transform)
         elif self.dataset_name == 'iu_xray' and self.cls:
-            self.dataset = IuxrayMultiImageClsDataset(self.config, tokenizer, self.split, transform=self.transform, vis=self.vis)
+            self.dataset = IuxrayMultiImageClsDataset(self.config, tokenizer, self.split, transform=self.transform,
+                                                      vis=self.vis)
         elif self.dataset_name.startswith('mimic') and not self.cls:
             self.dataset = MIMICMultiImageDatasetArrow(config=self.config, tokenizer=tokenizer, split=self.split,
-                                                        transform=self.transform)
+                                                       transform=self.transform)
         elif self.dataset_name.startswith('mimic') and self.cls:
             self.dataset = MimiccxrSingleImageClsDataset(self.config, self.split, transform=self.transform,
                                                          vis=self.vis)
@@ -151,11 +170,11 @@ class R2DataLoader(DataLoader):
 
     @staticmethod
     def collate_fn(batch):
-        keys = ['img_id', 'image','img_labels','text', 'mask', 'seq_length'] # data used
-        batch_dict = {key:[sample[key] for sample in batch] for key in keys  }
+        keys = ['img_id', 'image', 'img_labels', 'text', 'mask', 'seq_length']  # data used
+        batch_dict = {key: [sample[key] for sample in batch] for key in keys}
 
-        reports_ids, reports_masks, seq_lengths, labels =  batch_dict['text'], batch_dict['mask'], \
-                                                           batch_dict['seq_length'], batch_dict['img_labels']
+        reports_ids, reports_masks, seq_lengths, labels = batch_dict['text'], batch_dict['mask'], \
+                                                          batch_dict['seq_length'], batch_dict['img_labels']
         batch_dict['image'] = torch.stack(batch_dict['image'], 0)
         max_seq_length = max(seq_lengths)
         labels = np.array(labels)
@@ -173,7 +192,7 @@ class R2DataLoader(DataLoader):
         batch_dict['mask'] = torch.FloatTensor(targets_masks)
         batch_dict['img_labels'] = torch.FloatTensor(labels)
 
-        return  batch_dict
+        return batch_dict
 
 
 def seed_worker(worker_id):

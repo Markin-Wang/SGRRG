@@ -20,13 +20,12 @@ from config import ex
 # from data.multitask_datamodule import MTDataModule
 import resource
 import copy
-rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-resource.setrlimit(resource.RLIMIT_NOFILE, (20480, rlimit[1]))
-os.environ["NCCL_DEBUG"] = "INFO"
+
 os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = 'true'
 import time
-#from apex import amp
+# from apex import amp
 import warnings
+
 warnings.filterwarnings("ignore", category=UserWarning)
 import os
 
@@ -39,17 +38,18 @@ def setup(world_size):
     os.environ["RANK"] = "0"
     os.environ["WORLD_SIZE"] = world_size
 
+
 @ex.automain
 def main(_config):
     _config = copy.deepcopy(_config)
     world_size = _config["n_gpu"]
-    #setup(str(_config["n_gpu"]))
+    # setup(str(_config["n_gpu"]))
 
     torch.cuda.set_device(_config['local_rank'])
     torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=world_size)
     rank = dist.get_rank()
     device_id = rank % torch.cuda.device_count()
-    #torch.distributed.barrier()
+    # torch.distributed.barrier()
 
     seed = _config['seed'] + dist.get_rank()
     torch.manual_seed(seed)
@@ -57,19 +57,16 @@ def main(_config):
     np.random.seed(seed)
     random.seed(seed)
     cudnn.benchmark = False
-    save_dir = os.path.join(_config['output'],_config['dataset_name'])
+    save_dir = os.path.join(_config['output'], _config['dataset_name'], _config['exp_name'])
     os.makedirs(save_dir, exist_ok=True)
-    logger = create_logger(output_dir=save_dir,dist_rank=_config['local_rank'], name=_config['exp_name'])
+    logger = create_logger(output_dir=save_dir, dist_rank=_config['local_rank'], name=_config['exp_name'])
 
-
-
-    writer = SummaryWriter(log_dir=os.path.join(_config['output'], _config['exp_name']))
+    writer = SummaryWriter(log_dir=os.path.join(_config['output'], _config['dataset_name'], _config['exp_name']))
     # create tokenizer
-
 
     # create data loader
     train_dataloader = R2DataLoader(_config, None, split='train', shuffle=True)
-    tokenizer = train_dataloader.dataset.tokenizer # remember to delete the old vocab when new one
+    tokenizer = train_dataloader.dataset.tokenizer  # remember to delete the old vocab when new one
     _config['vocab_size'] = tokenizer.get_vocab_size()
 
     val_dataloader = R2DataLoader(_config, tokenizer, split='val', shuffle=False)
@@ -86,10 +83,9 @@ def main(_config):
     # 35s for iu xray loading 5 times array
     # 34s for iu xray loading 5 time origin
 
-
-    dm = {'train_dataloader':train_dataloader,'val_dataloader':val_dataloader,'test_dataloader':test_dataloader,'tokenizer':tokenizer}
+    dm = {'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader, 'test_dataloader': test_dataloader,
+          'tokenizer': tokenizer}
     # dm = MTDataModule(_config, dist=True)
-
 
     # build model architecture
     model = RRGModel(tokenizer, logger, _config)
@@ -104,17 +100,16 @@ def main(_config):
     # if args.amp_opt_level != "O0":
     #     model, optimizer = amp.initialize(model, optimizer, opt_level=args.amp_opt_level)
 
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id], broadcast_buffers=False,find_unused_parameters=True)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id], broadcast_buffers=False,
+                                                      find_unused_parameters=_config['debug'])
     model_without_ddp = model.module
 
+    if _config['compile']:
+        model = torch.compile(model, mode='reduce-overhead')
 
-    if config['compile']:
-        model = torch.compile(model,mode='reduce-overhead')
-
-    #print(model)
+    # print(model)
 
     lr_scheduler = build_lr_scheduler(_config, optimizer, len(train_dataloader))
-
 
     if dist.get_rank() == _config['local_rank']:
         logger.info(_config)
@@ -130,7 +125,7 @@ def main(_config):
             flops = model_without_ddp.flops()
             logger.info(f"number of GFLOPs: {flops / 1e9}")
 
-    if len(_config['load_path'])>0:
+    if len(_config['load_path']) > 0:
         state_dict = torch.load(args.pretrained)['model']
         logger.info(state_dict.keys())
         state_dict.pop('head.weight')
@@ -150,9 +145,8 @@ def main(_config):
     writer.close()
 
 
-
 def scale_lr(config):
-    #linear scale the learning rate according to total batch size, may not be optimal
+    # linear scale the learning rate according to total batch size, may not be optimal
     linear_scaled_imglr = config['lr_ve'] * config['batch_size'] * dist.get_world_size() / 64.0
     linear_scaled_textlr = config['lr_ed'] * config['batch_size'] * dist.get_world_size() / 64.0
     # linear_scaled_crosslr = config['cross_base_lr'] * config['per_gpu_batchsize'] * dist.get_world_size() / 64.0
