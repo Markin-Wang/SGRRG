@@ -1,0 +1,369 @@
+from sacred import Experiment
+
+ex = Experiment("FIBER")
+
+# for mimic-cxr attribute classification
+id2cat  = [('left lung', 68),
+ ('right lung', 68),
+ ('cardiac silhouette', 34),
+ ('mediastinum', 40),
+ ('left lower lung zone', 57),
+ ('right lower lung zone', 58),
+ ('right hilar structures', 48),
+ ('left hilar structures', 49),
+ ('upper mediastinum', 30),
+ ('left costophrenic angle', 34),
+ ('right costophrenic angle', 34),
+ ('left mid lung zone', 48),
+ ('right mid lung zone', 48),
+ ('aortic arch', 12),
+ ('right upper lung zone', 49),
+ ('left upper lung zone', 45),
+ ('right hemidiaphragm', 14),
+ ('right clavicle', 16),
+ ('left clavicle', 15),
+ ('left hemidiaphragm', 13),
+ ('right apical zone', 24),
+ ('trachea', 10),
+ ('left apical zone', 23),
+ ('carina', 5),
+ ('svc', 9),
+ ('right atrium', 7),
+ ('cavoatrial junction', 4),
+ ('abdomen', 9),
+ ('spine', 13)]
+
+
+def _loss_names(d):
+    ret = {
+        "itm": 0,
+        "itc": 0,
+        "mlm": 0,
+        "vqa": 0,
+        "nlvr2": 0,
+        "caption_mle": 0,
+        "caption_gold": 0,
+        "caption_cider": 0,
+    }
+    ret.update(d)
+    return ret
+
+
+@ex.config
+def config():
+    exp_name = "fiber"
+    seed = 0
+    data_dir = 'datasets'
+    # datasets = ["coco", "vg", "sbu", "gcc"]
+    loss_names = _loss_names({"itm": 1, "mlm": 1, "itc": 1})
+    # batch_size = (
+    #     4096  # this is a desired batch size; pl trainer will accumulate gradients when per step batch is smaller.
+    # )
+    batch_size = 16
+    dataset_name = 'mimic_cxr'
+    label_path = 'labels/labels.json'
+    pretrained = ''
+    model_path = ''
+    output = 'output'  # output dir
+    eval = False  # whether to perform evaluation only
+    img_backbone = 'resnet101'
+
+    logs_folder = 'tensorboard_logs'
+    max_seq_length = 60
+    threshold = 10
+    num_workers = 8
+
+    # Model
+    ve_name = 'swin_s'
+    ed_name = 'st_trans'
+    visual_extractor_pretrained = True  # whether to load the pretrained visual extractor
+    d_model = 512  # the dimension of Transformer.
+    d_ff = 512  # the dimension of Transformer.
+    d_vf = 2048  # the dimension of the patch features.
+    num_heads = 8
+    num_layers_en = 3
+    num_layers_de = 3
+    dropout = 0.1
+    logit_layers = 1
+    bos_idx = 0
+    eos_idx = 0
+    pad_idx = 0
+    use_bn = 0
+    drop_prob_lm = 0.5
+
+    # Beam Search
+    sample_method = 'beam_search'
+    beam_size = 3
+    temperature = 1.0
+    sample_n = 1
+    group_size = 1
+    diversity_lambda = 0.5
+    length_penalty = ''
+    suppress_UNK = 0
+
+    # learning schedule
+    warmup_ratio = 10
+    warmup_epochs = 5
+    output_logsoftmax = 1
+    decoding_constraint = 0
+    block_trigrams = 1
+    optim = 'AdamW'
+    lr_ve = 5e-5
+    lr_ed = 1e-4
+    weight_decay = 5e-5
+    decay_epochs = 10
+    amsgrad = False
+    lr_scheduler = 'step'
+    step_size = 50
+    decay_rate = 0.8
+    clip_value = 0.1
+    clip_option = 'value'
+    eps = 1e-8
+    early_stop = 10
+    warmup_ratio = 100
+    msw_w = 0.5
+
+    # trainer setting
+    image_size = 224
+    rotate_degree = 10
+    compile = False # whether use the torch.compile for model, only supported by pytorch >= 2.0
+    dsr = 1 # down sample rate for the dataset
+    resolution_before = 224
+    n_gpu = 1
+    epochs = 100
+    use_amp = True
+    save_dir = 'results/iu_xray'
+    record_dir = 'records/'
+    save_period = 1
+    monitor_mode = 'max'
+    early_stop = 50
+    fp16 = True
+    balanced = False
+    vis = False
+    test = False
+    debug = False
+    num_patches = 98  # the number of image patches in encoder
+    block3 = False
+    encode_text = False
+    num_layers_ten = 0
+    cvt_attn = False
+    stride_kv = 1
+    stride_q = 1
+    padding_q = 1
+    padding_kv = 1
+    kernel_size = 3
+    conv_embed = False
+    bwinit = False
+    cfg = 'configs/swin_tiny_patch4_window7_224.yaml'
+    local_rank = 0
+    load_path = ''
+
+    # Evaluation
+    monitor_metric = 'BLEU_4'
+
+    # For CAMANet
+    cls = False
+    addcls = False
+    att_cls = False  # attribute classification
+    randaug = False
+    resume = False
+    fbl = False
+    sub_back = False
+    attn_cam = False
+    drop_fbl = False
+    attn_method = False
+    early_exit = False  # used for test
+    cls_w = 0.5
+    wmse = 0.5
+    layer_id = 2  # the layer id in encoder to select attention
+    topk = 0.1
+    fore_t = 0.6
+    back_t = 0.3
+    pe = 'none'  # whether to use absolute position embedding in encoder
+
+
+@ex.named_config
+def task_train_caption_iu():
+    exp_name = 'iu_test'
+    dataset_name = 'iu_xray'
+    max_seq_length = 60
+    threshold = 3
+    batch_size = 8
+    epochs = 40
+    lr_ve = 1e-3
+    lr_ed = 2e-3
+    img_backbone = 'swin_base_patch4_window7_224_in22k'
+    d_vf = 1024
+    ed_name = 'st_trans'
+    seed = 9223
+    use_amp = True
+
+
+@ex.named_config
+def task_train_caption_mimic():
+    exp_name = 'mimic_test'
+    dataset_name = 'mimic_cxr'
+    dsr = 2
+    max_seq_length = 100
+    threshold = 10
+    batch_size = 16
+    epochs = 30
+    lr_ve = 5e-5
+    lr_ed = 1e-4
+    img_backbone = 'swin_base_patch4_window7_224_in22k'
+    d_vf = 1024
+    ed_name = 'st_trans'
+    seed = 9223
+    use_amp = True
+
+
+@ex.named_config
+def task_train_caption_mle_mimic_224_biobert():
+    exp_name = "train_caption_mle_mimic"
+    datasets = ["mimic_cxr"]
+    vit = "swin_base_patch4_window7_224_in22k"
+    loss_names = _loss_names({"caption_mle": 1})
+    batch_size = 512
+    max_epoch = 10
+    max_steps = None
+    warmup_steps = 0.1
+    learning_rate = 5e-5
+    lr_mult_cross_modal = 5
+    lr_mult_head = 5
+    max_text_len = 100
+    train_transform_keys = ["albef_randaug"]
+    val_transform_keys = ["albef"]
+    image_size = 224
+    resolution_before = 224
+    pretrained_vit = True
+    tokenizer = 'emilyalsentzer/Bio_ClinicalBERT'
+    text_backbone = 'emilyalsentzer/Bio_ClinicalBERT'
+    vocab_size = 28996
+
+
+@ex.named_config
+def task_train_caption_mle_mimic_384_biobert():
+    exp_name = "train_caption_mle_mimic"
+    datasets = ["mimic_cxr"]
+    vit = "swin_base_patch4_window7_224_in22k"
+    loss_names = _loss_names({"caption_mle": 1})
+    batch_size = 512
+    max_epoch = 10
+    max_steps = None
+    warmup_steps = 0.1
+    learning_rate = 5e-5
+    lr_mult_cross_modal = 5
+    lr_mult_head = 5
+    max_text_len = 100
+    train_transform_keys = ["albef_randaug"]
+    val_transform_keys = ["albef"]
+    image_size = 384
+    resolution_before = 224
+    pretrained_vit = True
+    tokenizer = 'emilyalsentzer/Bio_ClinicalBERT'
+    text_backbone = 'emilyalsentzer/Bio_ClinicalBERT'
+    vocab_size = 28996
+
+
+@ex.named_config
+def task_finetune_caption_mle_mimic_224():
+    exp_name = "finetune_caption_mle_mimic"
+    datasets = ["mimic_cxr"]
+    vit = "swin_base_patch4_window7_224_in22k"
+    loss_names = _loss_names({"caption_mle": 1})
+    batch_size = 512
+    max_epoch = 10
+    max_steps = None
+    warmup_steps = 0.1
+    learning_rate = 5e-5
+    lr_mult_cross_modal = 5
+    lr_mult_head = 5
+    max_text_len = 100
+    train_transform_keys = ["albef_randaug"]
+    val_transform_keys = ["albef"]
+    image_size = 224
+    resolution_before = 224
+    pretrained_vit = False
+
+
+@ex.named_config
+def task_train_caption_mle_mimic_224to384():
+    exp_name = "finetune_caption_mle_mimic"
+    datasets = ["mimic_cxr"]
+    vit = "swin_base_patch4_window7_224_in22k"
+    loss_names = _loss_names({"caption_mle": 1})
+    batch_size = 512
+    max_epoch = 10
+    max_steps = None
+    warmup_steps = 0.1
+    learning_rate = 1e-6
+    lr_mult_cross_modal = 5
+    lr_mult_head = 5
+    max_text_len = 100
+    train_transform_keys = ["albef_randaug"]
+    val_transform_keys = ["albef"]
+    image_size = 384
+    resolution_before = 224
+    pretrained_vit = True
+
+
+@ex.named_config
+def task_train_caption_mle_mimic_384():
+    exp_name = "finetune_caption_mle_mimic"
+    datasets = ["mimic_cxr"]
+    vit = "swin_base_patch4_window12_384_in22k"
+    loss_names = _loss_names({"caption_mle": 1})
+    batch_size = 512
+    max_epoch = 10
+    max_steps = None
+    warmup_steps = 0.1
+    learning_rate = 5e-5
+    lr_mult_cross_modal = 5
+    lr_mult_head = 5
+    max_text_len = 100
+    train_transform_keys = ["albef_randaug"]
+    val_transform_keys = ["albef"]
+    image_size = 384
+    pretrained_vit = True
+
+
+@ex.named_config
+def task_finetune_caption_mle_mimic_384():
+    exp_name = "finetune_caption_mle_mimic"
+    datasets = ["mimic_cxr"]
+    vit = "swin_base_patch4_window12_384_in22k"
+    loss_names = _loss_names({"caption_mle": 1})
+    batch_size = 512
+    max_epoch = 10
+    max_steps = None
+    warmup_steps = 0.1
+    learning_rate = 5e-5
+    lr_mult_cross_modal = 5
+    lr_mult_head = 5
+    max_text_len = 100
+    train_transform_keys = ["albef_randaug"]
+    val_transform_keys = ["albef"]
+    image_size = 384
+    resolution_before = 384
+    pretrained_vit = False
+
+
+@ex.named_config
+def task_finetune_caption_mle_mimic_384to224():
+    exp_name = "finetune_caption_mle_mimic"
+    datasets = ["mimic_cxr"]
+    vit = "swin_base_patch4_window12_384_in22k"
+    loss_names = _loss_names({"caption_mle": 1})
+    batch_size = 512
+    max_epoch = 10
+    max_steps = None
+    warmup_steps = 0.1
+    learning_rate = 5e-5
+    lr_mult_cross_modal = 5
+    lr_mult_head = 5
+    max_text_len = 100
+    train_transform_keys = ["albef_randaug"]
+    val_transform_keys = ["albef"]
+    image_size = 224
+    resolution_before = 384
+    pretrained_vit = False
