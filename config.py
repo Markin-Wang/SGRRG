@@ -119,7 +119,6 @@ def config():
     clip_value = 0.1
     clip_option = 'value'
     eps = 1e-8
-    early_stop = 10
     warmup_ratio = 100
     msw_w = 0.5
 
@@ -136,7 +135,7 @@ def config():
     record_dir = 'records/'
     save_period = 1
     monitor_mode = 'max'
-    early_stop = 50
+    early_stop = 10
     fp16 = True
     balanced = False
     vis = False
