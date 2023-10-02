@@ -105,7 +105,7 @@ def main(_config):
     model_without_ddp = model.module
 
     if _config['compile']:
-        model = torch.compile(model, mode='reduce-overhead')
+        model = torch.compile(model)
 
     # print(model)
 
