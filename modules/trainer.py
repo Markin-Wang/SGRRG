@@ -297,12 +297,13 @@ class Trainer(BaseTrainer):
         with tqdm(desc='Epoch %d - train' % (epoch),
                   unit='it', total=len(self.train_dataloader)) as pbar:
             for batch_idx, data in enumerate(self.train_dataloader):
-                images, reports_ids, reports_masks, labels = data['image'].cuda(non_blocking=True), \
-                                                     data['text'].cuda(non_blocking=True), \
-                                                     data['mask'].cuda(non_blocking=True), \
-                                                     data['img_labels'].cuda(non_blocking=True)
+                images, reports_ids, reports_masks, labels = data['image'].to(self.model.device,non_blocking=True), \
+                                                     data['text'].to(self.model.device,non_blocking=True), \
+                                                     data['mask'].to(self.model.device,non_blocking=True), \
+                                                     data['img_labels'].to(self.model.device,non_blocking=True)
                 logits, total_attn = None, None
                 self.optimizer.zero_grad()
+                print(11111,images.device,self.model.device)
                 with autocast(dtype=torch.float16):
                     if self.addcls:
                         output, logits, cam, fore_map, total_attn, _, _ = self.model(images, reports_ids, labels, mode='train')
