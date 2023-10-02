@@ -303,7 +303,6 @@ class Trainer(BaseTrainer):
                                                      data['img_labels'].to(self.model.device,non_blocking=True)
                 logits, total_attn = None, None
                 self.optimizer.zero_grad()
-                print(11111,images.device,self.model.device)
                 with autocast(dtype=torch.float16):
                     if self.addcls:
                         output, logits, cam, fore_map, total_attn, _, _ = self.model(images, reports_ids, labels, mode='train')
