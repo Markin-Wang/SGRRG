@@ -170,14 +170,18 @@ class R2DataLoader(DataLoader):
 
     @staticmethod
     def collate_fn(batch):
-        keys = ['img_id', 'image', 'img_labels', 'text', 'mask', 'seq_length']  # data used
+        keys = ['img_id', 'image', 'text', 'mask', 'seq_length']  # data used
+
+        if 'boxes' in batch[0].keys():
+            keys.extend(['labels', 'boxes'])
+
         batch_dict = {key: [sample[key] for sample in batch] for key in keys}
 
-        reports_ids, reports_masks, seq_lengths, labels = batch_dict['text'], batch_dict['mask'], \
-                                                          batch_dict['seq_length'], batch_dict['img_labels']
+        reports_ids, reports_masks, seq_lengths,  = batch_dict['text'], batch_dict['mask'], batch_dict['seq_length']
+
+
         batch_dict['image'] = torch.stack(batch_dict['image'], 0)
         max_seq_length = max(seq_lengths)
-        labels = np.array(labels)
 
         targets = np.zeros((len(reports_ids), max_seq_length), dtype=int)
         targets_masks = np.zeros((len(reports_ids), max_seq_length), dtype=int)
@@ -190,7 +194,19 @@ class R2DataLoader(DataLoader):
 
         batch_dict['text'] = torch.LongTensor(targets)
         batch_dict['mask'] = torch.FloatTensor(targets_masks)
-        batch_dict['img_labels'] = torch.FloatTensor(labels)
+
+        if 'boxes' in batch[0].keys():
+            boxes, labels = batch_dict['boxes'],batch_dict['labels']
+            boxes_, labels_ = [], []
+            for i, (box, label) in enumerate(zip(boxes, labels)):
+                num_box = len(box)
+                box_with_id = torch.zeros(num_box, 5)
+                box_with_id[:, 0] = i
+                box_with_id[:, 1:] = box
+                boxes_.append(box_with_id)
+                labels_.append(torch.from_numpy(label))
+            batch_dict['boxes'] = torch.cat(boxes_, dim=0)
+            batch_dict['labels'] = torch.cat(labels_, dim=0)
 
         return batch_dict
 

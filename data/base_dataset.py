@@ -84,12 +84,6 @@ class BaseDatasetArrow(Dataset):
     def get_image(self, index, image_key="image"):
         iid = self.table['image_id'][index].as_py()
         if 'iu_xray' in self.dataset_name:
-            array = iid.split('-')
-            modified_id = array[0] + '-' + array[1]
-            label = np.array(self.labels[modified_id]).astype(np.float32)
-        else:
-            label = np.array(self.labels[iid]).astype(np.float32)
-        if 'iu_xray' in self.dataset_name:
             image1 = self.get_raw_image(index, image_key='image1')
             image2 = self.get_raw_image(index, image_key='image2')
             image_tensor1 = [self.transform['norm_to_tensor'](self.transform['common_aug'](image1))]
@@ -102,7 +96,7 @@ class BaseDatasetArrow(Dataset):
                 bboxes = datapoints.BoundingBox(box_ann['bboxes'], format=datapoints.BoundingBoxFormat.XYXY,
                                                 spatial_size=box_ann['spatial_size']
                                                 )
-                image_tensor, bboxes = self.transform['common_aug'](image, {"boxes": bboxes, "labels": box_ann['labels']})
+                image_tensor, box_ann = self.transform['common_aug'](image, {"boxes": bboxes, "labels": box_ann['labels']})
                 image_tensor =  self.transform['norm_to_tensor'](image_tensor)
             else:
                 image_tensor = self.transform['common_aug'](image)
@@ -112,10 +106,10 @@ class BaseDatasetArrow(Dataset):
             "img_id": iid,
             "img_index": index,
             "raw_index": index,
-            'img_labels': label,
         }
         if self.att_cls:
-            return_dict.update({'bboxes':bboxes,'bboxes_label':box_ann['labels']})
+            box_ann['labels'] = box_ann['labels']-1 # the category id for mimic cxr strats from 1
+            return_dict.update(box_ann)
         # image = self.get_raw_image(index, image_key=image_key)
         # image_tensor = [tr(image) for tr in self.transforms]
         return return_dict
@@ -171,6 +165,8 @@ class BaseDatasetArrow(Dataset):
         gt_bboxes_ignore = []
         gt_masks_ann = []
         groundtruth_is_crowd = []
+        original_height, original_width = img_info['height'], img_info['width']
+        img_height, img_width = original_height / self.dsr, original_width / self.dsr
         for i, ann in enumerate(ann_info):
             if ann.get('ignore', False):
                 continue
@@ -225,7 +221,7 @@ class BaseDatasetArrow(Dataset):
         ann = dict(
             bboxes=gt_bboxes,
             labels=gt_labels,
-            spatial_size=(h,w),
+            spatial_size=(img_height,img_width),
             groundtruth_is_crowd=groundtruth_is_crowd,
             bboxes_ignore=gt_bboxes_ignore,
             masks=gt_masks_ann,

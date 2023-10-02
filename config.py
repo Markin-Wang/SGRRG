@@ -133,6 +133,12 @@ def config():
     use_amp = True
     save_dir = 'results/iu_xray'
     record_dir = 'records/'
+
+    # attribute classification setting
+    feature_size = image_size // 32 # 32 is the downsampling rate for the visual extractor
+    output_size = 3
+    num_classes = 29 # the number of anatomical locations
+
     save_period = 1
     monitor_mode = 'max'
     early_stop = 10
@@ -209,160 +215,10 @@ def task_train_caption_mimic():
     epochs = 30
     lr_ve = 5e-5
     lr_ed = 1e-4
-    img_backbone = 'swin_base_patch4_window7_224_in22k'
+    img_backbone = 'swin_base_patch4_window12_384_in22k'
+    resolution_before = 384
+    image_size = 384
     d_vf = 1024
     ed_name = 'st_trans'
     seed = 9223
     use_amp = True
-
-
-@ex.named_config
-def task_train_caption_mle_mimic_224_biobert():
-    exp_name = "train_caption_mle_mimic"
-    datasets = ["mimic_cxr"]
-    vit = "swin_base_patch4_window7_224_in22k"
-    loss_names = _loss_names({"caption_mle": 1})
-    batch_size = 512
-    max_epoch = 10
-    max_steps = None
-    warmup_steps = 0.1
-    learning_rate = 5e-5
-    lr_mult_cross_modal = 5
-    lr_mult_head = 5
-    max_text_len = 100
-    train_transform_keys = ["albef_randaug"]
-    val_transform_keys = ["albef"]
-    image_size = 224
-    resolution_before = 224
-    pretrained_vit = True
-    tokenizer = 'emilyalsentzer/Bio_ClinicalBERT'
-    text_backbone = 'emilyalsentzer/Bio_ClinicalBERT'
-    vocab_size = 28996
-
-
-@ex.named_config
-def task_train_caption_mle_mimic_384_biobert():
-    exp_name = "train_caption_mle_mimic"
-    datasets = ["mimic_cxr"]
-    vit = "swin_base_patch4_window7_224_in22k"
-    loss_names = _loss_names({"caption_mle": 1})
-    batch_size = 512
-    max_epoch = 10
-    max_steps = None
-    warmup_steps = 0.1
-    learning_rate = 5e-5
-    lr_mult_cross_modal = 5
-    lr_mult_head = 5
-    max_text_len = 100
-    train_transform_keys = ["albef_randaug"]
-    val_transform_keys = ["albef"]
-    image_size = 384
-    resolution_before = 224
-    pretrained_vit = True
-    tokenizer = 'emilyalsentzer/Bio_ClinicalBERT'
-    text_backbone = 'emilyalsentzer/Bio_ClinicalBERT'
-    vocab_size = 28996
-
-
-@ex.named_config
-def task_finetune_caption_mle_mimic_224():
-    exp_name = "finetune_caption_mle_mimic"
-    datasets = ["mimic_cxr"]
-    vit = "swin_base_patch4_window7_224_in22k"
-    loss_names = _loss_names({"caption_mle": 1})
-    batch_size = 512
-    max_epoch = 10
-    max_steps = None
-    warmup_steps = 0.1
-    learning_rate = 5e-5
-    lr_mult_cross_modal = 5
-    lr_mult_head = 5
-    max_text_len = 100
-    train_transform_keys = ["albef_randaug"]
-    val_transform_keys = ["albef"]
-    image_size = 224
-    resolution_before = 224
-    pretrained_vit = False
-
-
-@ex.named_config
-def task_train_caption_mle_mimic_224to384():
-    exp_name = "finetune_caption_mle_mimic"
-    datasets = ["mimic_cxr"]
-    vit = "swin_base_patch4_window7_224_in22k"
-    loss_names = _loss_names({"caption_mle": 1})
-    batch_size = 512
-    max_epoch = 10
-    max_steps = None
-    warmup_steps = 0.1
-    learning_rate = 1e-6
-    lr_mult_cross_modal = 5
-    lr_mult_head = 5
-    max_text_len = 100
-    train_transform_keys = ["albef_randaug"]
-    val_transform_keys = ["albef"]
-    image_size = 384
-    resolution_before = 224
-    pretrained_vit = True
-
-
-@ex.named_config
-def task_train_caption_mle_mimic_384():
-    exp_name = "finetune_caption_mle_mimic"
-    datasets = ["mimic_cxr"]
-    vit = "swin_base_patch4_window12_384_in22k"
-    loss_names = _loss_names({"caption_mle": 1})
-    batch_size = 512
-    max_epoch = 10
-    max_steps = None
-    warmup_steps = 0.1
-    learning_rate = 5e-5
-    lr_mult_cross_modal = 5
-    lr_mult_head = 5
-    max_text_len = 100
-    train_transform_keys = ["albef_randaug"]
-    val_transform_keys = ["albef"]
-    image_size = 384
-    pretrained_vit = True
-
-
-@ex.named_config
-def task_finetune_caption_mle_mimic_384():
-    exp_name = "finetune_caption_mle_mimic"
-    datasets = ["mimic_cxr"]
-    vit = "swin_base_patch4_window12_384_in22k"
-    loss_names = _loss_names({"caption_mle": 1})
-    batch_size = 512
-    max_epoch = 10
-    max_steps = None
-    warmup_steps = 0.1
-    learning_rate = 5e-5
-    lr_mult_cross_modal = 5
-    lr_mult_head = 5
-    max_text_len = 100
-    train_transform_keys = ["albef_randaug"]
-    val_transform_keys = ["albef"]
-    image_size = 384
-    resolution_before = 384
-    pretrained_vit = False
-
-
-@ex.named_config
-def task_finetune_caption_mle_mimic_384to224():
-    exp_name = "finetune_caption_mle_mimic"
-    datasets = ["mimic_cxr"]
-    vit = "swin_base_patch4_window12_384_in22k"
-    loss_names = _loss_names({"caption_mle": 1})
-    batch_size = 512
-    max_epoch = 10
-    max_steps = None
-    warmup_steps = 0.1
-    learning_rate = 5e-5
-    lr_mult_cross_modal = 5
-    lr_mult_head = 5
-    max_text_len = 100
-    train_transform_keys = ["albef_randaug"]
-    val_transform_keys = ["albef"]
-    image_size = 224
-    resolution_before = 384
-    pretrained_vit = False

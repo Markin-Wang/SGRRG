@@ -50,6 +50,7 @@ class BaseTrainer(object):
         #     for submodule in model.modules():
         #         submodule.register_forward_hook(nan_hook)
         self.model = model
+        self.att_cls = config['att_cls'] # attribute classification
         # for name, module in self.model.named_modules():
         #     module.register_backward_hook(get_activations(name))
         self.optimizer = optimizer
@@ -294,18 +295,21 @@ class Trainer(BaseTrainer):
         self.model.train()
         #cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
         self.optimizer.zero_grad()
-        with tqdm(desc='Epoch %d - train' % (epoch),
+        device = self.model.device
+        with tqdm(desc='Epoch %d - train' % epoch,
                   unit='it', total=len(self.train_dataloader)) as pbar:
             for batch_idx, data in enumerate(self.train_dataloader):
-                images, reports_ids, reports_masks, labels = data['image'].to(self.model.device,non_blocking=True), \
-                                                     data['text'].to(self.model.device,non_blocking=True), \
-                                                     data['mask'].to(self.model.device,non_blocking=True), \
-                                                     data['img_labels'].to(self.model.device,non_blocking=True)
+                images, reports_ids, reports_masks = data['image'].to(device,non_blocking=True), \
+                                                     data['text'].to(device,non_blocking=True), \
+                                                     data['mask'].to(device,non_blocking=True)
+                boxes, box_labels = None, None
+                if self.att_cls:
+                    boxes, box_labels = data['boxes'].to(device,non_blocking=True), data['labels'].to(device,non_blocking=True)
                 logits, total_attn = None, None
                 self.optimizer.zero_grad()
                 with autocast(dtype=torch.float16):
-                    if self.addcls:
-                        output, logits, cam, fore_map, total_attn, _, _ = self.model(images, reports_ids, labels, mode='train')
+                    if self.att_cls:
+                        output, logits = self.model(images, reports_ids,boxes=boxes, box_labels=box_labels,mode='train')
                     else:
                         output = self.model(images, reports_ids, mode='train')
                     loss = self.criterion(output, reports_ids, reports_masks)
@@ -380,24 +384,22 @@ class Trainer(BaseTrainer):
         log = {}
         self.model.eval()
         dataloader = self.val_dataloader if split=='val' else self.test_dataloader
+        device = self.model.device
 
         with tqdm(desc=f'Epoch %d - {split}' % epoch, unit='it', total=len(dataloader)) as pbar:
             with torch.no_grad():
                 val_gts, val_res = [], []
                 for batch_idx, data in enumerate(
                         dataloader):
-                    images, reports_ids, reports_masks, labels = data['image'].cuda(non_blocking=True), \
-                                                                 data['text'].cuda(non_blocking=True), \
-                                                                 data['mask'].cuda(non_blocking=True), \
-                                                                 data['img_labels'].cuda(non_blocking=True)
-                    total_attn = None
+                    images, reports_ids, reports_masks = data['image'].to(device,non_blocking=True), \
+                                                                 data['text'].to(device,non_blocking=True), \
+                                                                 data['mask'].to(device,non_blocking=True)
+                    total_attn, boxes, return_feats = None, None, None
                     with autocast(dtype=torch.float16):
                         if split == 'val':
-                            if self.addcls:
-                                out, logits, cam, fore_map, total_attn, _, _ = self.model(images, reports_ids, labels,
-                                                                                       mode='train')
-                                val_img_cls_loss = self.cls_criterion(logits, labels)
-                                val_img_cls_losses.update(val_img_cls_loss.item())
+                            if self.att_cls:
+                                out, logits = self.model(images, reports_ids, boxes=boxes, box_labels=box_labels,
+                                                            mode='train')
                             else:
                                 out,patch_feats = self.model(images, reports_ids, mode='train',return_feats=True)
                             loss = self.criterion(out, reports_ids, reports_masks)

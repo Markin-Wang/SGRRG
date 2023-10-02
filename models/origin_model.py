@@ -35,7 +35,9 @@ class RRGModel(nn.Module):
 
         self.encoder_decoder = st_trans(config)
 
-        #self.attribute_predictor = AttributePredictor(config)
+        if self.att_cls:
+            self.region_selector = nn.Linear(config['d_vf'],config['num_classes'])
+            self.attribute_predictor = AttributePredictor(config)
 
         # self.scene_graph_encoder =
        # if self.att_cls:
@@ -46,42 +48,42 @@ class RRGModel(nn.Module):
         return super().__str__() + '\nTrainable parameters: {}'.format(params)
 
     def get_img_feats(self, images, seq):
-        if self.addcls:
-            patch_feats, gbl_feats, logits, cams = self.visual_extractor(images)
-            # if self.fbl and labels is not None:
-            if self.fbl:
-                fore_rep, back_rep, fore_map = self.fore_back_learn(patch_feats, cams, logits)
-                if self.sub_back:
-                    patch_feats = patch_feats - back_rep
-                patch_feats = torch.cat((fore_rep, patch_feats), dim=1)
-                return patch_feats, gbl_feats, logits, cams
+        patch_feats, gbl_feats = self.get_img_feats(images)
+        return self.encode_img_feats(patch_feats,seq)
 
+
+    def extract_img_feats(self,images):
+        if self.addcls:
+            patch_feats, gbl_feats, logits = self.visual_extractor(images)
+            # if self.fbl and labels is not None:
         else:
             patch_feats, gbl_feats = self.visual_extractor(images)
+        return patch_feats, gbl_feats
+
+
+    def encode_img_feats(self,patch_feats,seq):
         patch_feats, seq, att_masks, seq_mask = self.encoder_decoder._prepare_feature_forward(patch_feats, None, seq)
         patch_feats = self.encoder_decoder.model.encode(patch_feats, att_masks)
         return patch_feats, seq, att_masks, seq_mask
 
-    def forward(self, images, targets=None, labels=None, mode='train', return_feats=False):
+
+    def forward(self, images, targets=None, boxes=None, box_labels=None, return_feats=False,mode='sample'):
         fore_map, total_attns, weights, attns, idxs, align_attns_train = None, None, None, None, None, None
-        if self.addcls:
-            patch_feats, gbl_feats, logits, cams = self.get_img_feats(images, targets)
-        else:
-            patch_feats, seq, att_masks, seq_mask = self.get_img_feats(images, targets)
+
+        patch_feats, _ = self.extract_img_feats(images)
+        if self.att_cls:
+            logits = self.attribute_predictor(patch_feats,boxes,box_labels)
+
+        encoded_img_feats, seq, att_masks, seq_mask = self.encode_img_feats(patch_feats, targets)
 
         if mode == 'train':
-            output, fore_rep_encoded, target_embed, align_attns = self.encoder_decoder(patch_feats, seq, att_masks,
-                                                                                       seq_mask,
-                                                                                       mode='forward')
-            if return_feats: return output, patch_feats
+            output, align_attns = self.encoder_decoder(encoded_img_feats, seq, att_masks, seq_mask)
+            if return_feats: return output, encoded_img_feats
             return output
-                # print(weights)
         elif mode == 'sample':
-            return patch_feats
+            return encoded_img_feats
         else:
             raise ValueError
-
-        return output, attns
 
     def core(self, it,
              patch_feats,

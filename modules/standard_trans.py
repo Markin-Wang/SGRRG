@@ -44,19 +44,14 @@ class Transformer(nn.Module):
         self.src_embed = src_embed
         self.fbl = fbl
 
-    def forward(self, src, tgt, src_mask, tgt_mask, mode = 'train'):
-        return self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask, mode)
+    def forward(self, src, tgt, src_mask, tgt_mask):
+        return self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask)
 
     def encode(self, src, src_mask):
         return self.vis_encoder(self.src_embed(src), src_mask)
 
-    def decode(self, hidden_states, src_mask, tgt, tgt_mask, mode = 'sample'):
+    def decode(self, hidden_states, src_mask, tgt, tgt_mask):
         target_emb = self.text_encoder(tgt,tgt_mask)
-        if self.fbl:
-            hidden_states, src_mask = hidden_states[:,1:], src_mask[:,:,1:]
-        if mode == 'train':
-            out, align_attns = self.decoder(target_emb, hidden_states, src_mask, tgt_mask)
-            return out, hidden_states[:,0], out, align_attns
         return self.decoder(target_emb, hidden_states, src_mask, tgt_mask)
 
 
@@ -378,13 +373,13 @@ class EncoderDecoder(nn.Module):
 
         return att_feats, seq, att_masks, seq_mask
 
-    def forward(self, att_feats, seq, att_masks=None, seq_mask=None,mode='train'):
+    def forward(self, att_feats, seq, att_masks=None, seq_mask=None):
         # att_feats, seq, att_masks, seq_mask = self._prepare_feature_forward(att_feats, att_masks, seq)
-        out, fore_rep_encoded, target_embed, align_attns = self.model.decode(att_feats, att_masks, seq, seq_mask, mode='train')
+        out, align_attns = self.model.decode(att_feats, att_masks, seq, seq_mask)
         # out, fore_rep_encoded, target_embed, align_attns = self.model(att_feats, seq, att_masks, seq_mask)
         outputs = self.logit(out)
         # cls_logits = self.cls_logit(torch.mean(out,dim=1))
-        return outputs, fore_rep_encoded, target_embed, align_attns
+        return outputs, align_attns
 
     def core(self, it, fc_feats_ph, att_feats_ph, memory, state, mask):
 
