@@ -45,7 +45,7 @@ class BaseTrainer(object):
         self.clip_value = config['clip_value']
         self.use_amp = config['use_amp']
         self.early_stop = config['early_stop']
-
+        self.local_rank = config['local_rank']
         # if args.debug:
         #     for submodule in model.modules():
         #         submodule.register_forward_hook(nan_hook)
@@ -118,34 +118,23 @@ class BaseTrainer(object):
             log.update(self._valid(epoch, 'test'))
             # save logged informations into log dict
             # synchronize log in different gpu
-            pairs = [[k, v] for k,v in log.items()]
-            keys = [x[0] for x in pairs]
-            values = torch.Tensor([x[1] for x in pairs]).cuda()
-            values=reduce_tensor(values)
+            log = self._synchronize_data(log)
 
-            log = {'epoch': epoch}
-            log.update({k: v.item() for k, v in zip(keys, values)})
-
-
-            self._record_best(log)
+            if dist.get_rank() == self.local_rank:
+                log['epoch'] = epoch
+                self._record_best(log)
 
                 # print logged informations to the screen
-            for key, value in log.items():
-                self.logger.info('\t{:15s}: {}'.format(str(key), value))
+                for key, value in log.items():
+                    self.logger.info('\t{:15s}: {}'.format(str(key), value))
 
                 # evaluate model performance according to configured metric, save best checkpoint as model_best
-            best = False
-            if self.mnt_mode != 'off':
-                try:
-                    # check whether model performance improved or not, according to specified metric(mnt_metric)
-                    cur_metric = log['val_BLEU_4'] + 0.3 * log['val_ROUGE_L']
-                    improved = (self.mnt_mode == 'min' and cur_metric <= self.mnt_val_best) or \
-                               (self.mnt_mode == 'max' and cur_metric > self.mnt_val_best)
-                except KeyError:
-                    self.logger.info("Warning: Metric '{}' is not found. " "Model performance monitoring is disabled.".format(
-                        self.mnt_metric))
-                    self.mnt_mode = 'off'
-                    improved = False
+                best = False
+                assert self.mnt_mode == 'max' or self.mnt_mode =='min'
+                 # check whether model performance improved or not, according to specified metric(mnt_metric)
+                cur_metric = log['val_BLEU_4'] + 0.3 * log['val_ROUGE_L']
+                improved = (self.mnt_mode == 'min' and cur_metric <= self.mnt_val_best) or \
+                           (self.mnt_mode == 'max' and cur_metric > self.mnt_val_best)
 
                 if improved:
                     self.mnt_val_best = cur_metric
@@ -161,15 +150,26 @@ class BaseTrainer(object):
                     break
                 self.logger.info('current best model in: {}'.format(self.best_epoch))
 
-            if dist.get_rank() == 0 and epoch % self.save_period == 0:
-                self._save_checkpoint(epoch, save_best=best)
-            torch.cuda.synchronize()
-            epoch_time = time.time() - start
-            self.logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
+                if epoch % self.save_period == 0:
+                    self._save_checkpoint(epoch, save_best=best)
+                self._write_log_to_file(log,epoch)
 
-        if dist.get_rank() == 0:
+        torch.cuda.synchronize()
+        epoch_time = time.time() - start
+        self.logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
+        if dist.get_rank() == self.local_rank:
             self._print_best()
             self._print_best_to_file()
+
+
+    def _synchronize_data(self,log):
+        pairs = [[k, v] for k, v in log.items()]
+        keys = [x[0] for x in pairs]
+        values = torch.Tensor([x[1] for x in pairs]).to(self.model.device)
+        values = reduce_tensor(values)
+        log.update({k: v.item() for k, v in zip(keys, values)})
+        return log
+
 
     def _print_best_to_file(self):
         crt_time = time.asctime(time.localtime(time.time()))
@@ -192,6 +192,10 @@ class BaseTrainer(object):
         # record_table = record_table.concat(self.best_recorder['val'], ignore_index=True)
         # record_table = record_table.concat(self.best_recorder['test'], ignore_index=True)
         record_table.to_csv(record_path, index=False)
+
+    def _write_log_to_file(self,log,epoch):
+        for key,value in log.items():
+            self.writer.add_scalar(f'data/{key}', value, epoch)
 
     def _prepare_device(self, n_gpu_use):
         n_gpu = torch.cuda.device_count()
@@ -296,7 +300,7 @@ class Trainer(BaseTrainer):
         #cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
         self.optimizer.zero_grad()
         device = self.model.device
-        with tqdm(desc='Epoch %d - train' % epoch,
+        with tqdm(desc='Epoch %d - train' % epoch, disable = dist.get_rank() != self.local_rank,
                   unit='it', total=len(self.train_dataloader)) as pbar:
             for batch_idx, data in enumerate(self.train_dataloader):
                 images, reports_ids, reports_masks = data['image'].to(device,non_blocking=True), \
@@ -386,7 +390,8 @@ class Trainer(BaseTrainer):
         dataloader = self.val_dataloader if split=='val' else self.test_dataloader
         device = self.model.device
 
-        with tqdm(desc=f'Epoch %d - {split}' % epoch, unit='it', total=len(dataloader)) as pbar:
+        with tqdm(desc=f'Epoch %d - {split}' % epoch, unit='it', total=len(dataloader),
+                  disable = dist.get_rank()!=self.local_rank) as pbar:
             with torch.no_grad():
                 val_gts, val_res = [], []
                 for batch_idx, data in enumerate(
@@ -427,14 +432,5 @@ class Trainer(BaseTrainer):
                 log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
                 if split=='val':
                     log.update({'val_ce_loss':val_ce_losses.avg})
-                self.writer.add_scalar(f'data/{split}_bleu1', val_met['BLEU_1'], epoch)
-                self.writer.add_scalar(f'data/{split}_bleu2', val_met['BLEU_2'], epoch)
-                self.writer.add_scalar(f'data/{split}_bleu3', val_met['BLEU_3'], epoch)
-                self.writer.add_scalar(f'data/{split}_bleu4', val_met['BLEU_4'], epoch)
-                self.writer.add_scalar(f'data/{split}_meteor', val_met['METEOR'], epoch)
-                self.writer.add_scalar(f'data/{split}_rouge-l', val_met['ROUGE_L'], epoch)
-                self.writer.add_scalar(f'data/{split}_ce_loss', val_ce_losses.avg, epoch)
-                self.writer.add_scalar(f'data/{split}_cls_loss', val_img_cls_losses.avg / len(self.val_dataloader), epoch)
-                self.writer.add_scalar(f'data/{split}_mse_loss', val_mse_losses.avg / len(self.val_dataloader), epoch)
         return log
 
