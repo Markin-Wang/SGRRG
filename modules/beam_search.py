@@ -93,7 +93,7 @@ class BeamSearch:
                             trigrams[i][prev_two] = [current]
                 # Block used trigrams at next step
                 prev_two_batch = seq[:, t - 2:t]
-                mask = torch.zeros(logprobs.size(), requires_grad=False).cuda()  # batch_size x vocab_size
+                mask = torch.zeros(logprobs.size(), requires_grad=False).to(logprobs.device) # batch_size x vocab_size
                 for i in range(batch_size):
                     prev_two = (prev_two_batch[i][0].item(), prev_two_batch[i][1].item())
                     if prev_two in trigrams[i]:
@@ -357,7 +357,7 @@ class BeamSearch:
                     # move the current group one step forward in time
 
                     it = beam_seq_table[divm][:, :, t - divm].reshape(-1)
-                    logprobs_table[divm], state_table[divm] = model.core(it.cuda(),*(args[divm] + [state_table[divm]]))
+                    logprobs_table[divm], state_table[divm] = model.core(it.to(device),*(args[divm] + [state_table[divm]]))
                     # if self.vis:
                     #     attns = [attn.reshape(batch_size, -1, 1, *attn.shape[1:]) for attn in attns]
                     #     attns = torch.cat((attns[0], attns[1], attns[2]), dim=2).detach().cpu()
