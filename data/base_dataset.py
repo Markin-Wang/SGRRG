@@ -34,7 +34,7 @@ class BaseDatasetArrow(Dataset):
         self.dsr = config['dsr']  # down sample rate
         root = os.path.join(config['data_dir'], config['dataset_name'])
         self.table = pa.ipc.RecordBatchFileReader(pa.memory_map(f"{root}/{name}.arrow", "r")).read_all()
-        if self.dataset_name == 'mimic_cxr':
+        if self.dataset_name == 'mimic_cxr' and self.att_cls:
             # if self.split != 'train':
             #     img_filter_path = os.path.join(root, 'annotations', f"{name}.json")
             #     with open(img_filter_path, 'r') as f:

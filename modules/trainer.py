@@ -114,49 +114,47 @@ class BaseTrainer(object):
             start = time.time()
             self._train_epoch(epoch)
             log = {}
+
+            # evaluate model performance according to configured metric,
             log.update(self._valid(epoch, 'val'))
             log.update(self._valid(epoch, 'test'))
             # save logged informations into log dict
             # synchronize log in different gpu
             log = self._synchronize_data(log)
 
-            if dist.get_rank() == self.local_rank:
-                log['epoch'] = epoch
-                self._record_best(log)
+            log['epoch'] = epoch
 
-                # print logged informations to the screen
-                for key, value in log.items():
-                    self.logger.info('\t{:15s}: {}'.format(str(key), value))
+            # print logged informations to the screen
+            for key, value in log.items():
+                self.logger.info('\t{:15s}: {}'.format(str(key), value))
 
-                # evaluate model performance according to configured metric, save best checkpoint as model_best
-                best = False
-                assert self.mnt_mode == 'max' or self.mnt_mode =='min'
-                 # check whether model performance improved or not, according to specified metric(mnt_metric)
-                cur_metric = log['val_BLEU_4'] + 0.3 * log['val_ROUGE_L']
-                improved = (self.mnt_mode == 'min' and cur_metric <= self.mnt_val_best) or \
-                           (self.mnt_mode == 'max' and cur_metric > self.mnt_val_best)
+            improved = self._record_best(log)
 
-                if improved:
-                    self.mnt_val_best = cur_metric
-                    not_improved_count = 0
-                    best = True
-                    self.best_epoch = epoch
-                else:
-                    not_improved_count += 1
+            best = False
 
-                if not_improved_count > self.early_stop:
-                    self.logger.info("Validation performance didn\'t improve for {} epochs. " "Training stops.".format(
-                        self.early_stop))
-                    break
-                self.logger.info('current best model in: {}'.format(self.best_epoch))
+            if improved:
+                not_improved_count = 0
+                best = True
+                self.best_epoch = epoch
+            else:
+                not_improved_count += 1
 
-                if epoch % self.save_period == 0:
-                    self._save_checkpoint(epoch, save_best=best)
-                self._write_log_to_file(log,epoch)
+            self.logger.info('current best model in: {}'.format(self.best_epoch))
 
-        torch.cuda.synchronize()
-        epoch_time = time.time() - start
-        self.logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
+            if dist.get_rank() == self.local_rank and epoch % self.save_period == 0:
+                # save best checkpoint as model_best
+                self._save_checkpoint(epoch, save_best=best)
+                self._write_log_to_file(log, epoch)
+
+            torch.cuda.synchronize()
+            epoch_time = time.time() - start
+            self.logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
+
+            if not_improved_count > self.early_stop:
+                self.logger.info("Validation performance didn\'t improve for {} epochs. " "Training stops.".format(
+                    self.early_stop))
+                break
+
         if dist.get_rank() == self.local_rank:
             self._print_best()
             self._print_best_to_file()
@@ -252,19 +250,21 @@ class BaseTrainer(object):
         print("Checkpoint loaded. Resume training from epoch {}".format(self.start_epoch))
 
     def _record_best(self, log):
-        cur_metric = log['val_BLEU_4'] + 0.3 * log['val_ROUGE_L']
+        cur_metric = log['val_BLEU_4'] + 0.5 * log['val_METEOR']
         improved_val = (self.mnt_mode == 'min' and cur_metric <= self.mnt_val_best) or \
                        (self.mnt_mode == 'max' and cur_metric > self.mnt_val_best)
         if improved_val:
+            self.mnt_val_best = cur_metric
             self.best_recorder['val'].update(log)
 
-        cur_metric = log['test_BLEU_4'] + 0.3 * log['test_ROUGE_L']
+        cur_metric = log['test_BLEU_4'] + 0.5 * log['test_METEOR']
 
         improved_test = (self.mnt_mode == 'min' and cur_metric <= self.mnt_test_best) or \
                         (self.mnt_mode == 'max' and cur_metric > self.mnt_test_best)
         if improved_test:
             self.best_recorder['test'].update(log)
             self.mnt_test_best = cur_metric
+        return improved_val
 
     def _print_best(self):
         print('exp_name:', self.config['exp_name'])
