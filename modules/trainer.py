@@ -12,7 +12,7 @@ from modules.weighted_mesloss import Weighted_MSELoss
 from torch.cuda.amp import GradScaler, autocast
 from timm.utils import AverageMeter
 import torch.distributed as dist
-from .utils import clip_grad_norm_
+from .utils import clip_grad_norm_, calculate_auc
 import numpy as np
 from modules.beam_search import BeamSearch
 # from modules.utils import get_grad_norm
@@ -57,13 +57,12 @@ class BaseTrainer(object):
         self.scaler = GradScaler(enabled=self.use_amp, init_scale = 256)
 
 
-        self.addcls = config['addcls']
         self.clip_option = config['clip_option']
-        if config['addcls']:
-            self.cls_criterion = torch.nn.BCEWithLogitsLoss()
-            self.cls_w = config['cls_w']
-        self.attn_cam = config['attn_cam']
-        self.wmse = config['wmse']
+        if self.att_cls:
+            self.region_cls_criterion = torch.nn.BCEWithLogitsLoss()
+            self.region_cls_w = config['region_cls_w']
+
+
         if config['attn_cam']:
             self.mse_criterion = Weighted_MSELoss(weight=config['wmse'])
             self.mse_w = config['msw_w']
@@ -291,7 +290,7 @@ class Trainer(BaseTrainer):
 
     def _train_epoch(self, epoch):
         ce_losses = AverageMeter()
-        img_cls_losses = AverageMeter()
+        region_cls_losses = AverageMeter()
         mse_losses = AverageMeter()
         norm_meter = AverageMeter()
         std_fores, std_attns = 0, 0
@@ -306,27 +305,26 @@ class Trainer(BaseTrainer):
                 images, reports_ids, reports_masks = data['image'].to(device,non_blocking=True), \
                                                      data['text'].to(device,non_blocking=True), \
                                                      data['mask'].to(device,non_blocking=True)
-                boxes, box_labels = None, None
+                boxes, box_labels, region_labels = None, None, None
                 if self.att_cls:
-                    boxes, box_labels = data['boxes'].to(device,non_blocking=True), data['labels'].to(device,non_blocking=True)
-                logits, total_attn = None, None
+                    boxes, box_labels,region_labels = data['boxes'].to(device,non_blocking=True), \
+                                                      data['box_labels'].to(device,non_blocking=True), \
+                                                      data['region_labels'].to(device, non_blocking=True)
                 self.optimizer.zero_grad()
                 with autocast(dtype=torch.float16):
-                    if self.att_cls:
-                        output, logits = self.model(images, reports_ids,boxes=boxes, box_labels=box_labels,mode='train')
-                    else:
-                        output = self.model(images, reports_ids, mode='train')
+                    # region logits is None when att_cls disabled
+                    output, region_logits = self.model(images, reports_ids,boxes=boxes, box_labels=box_labels,mode='train')
                     loss = self.criterion(output, reports_ids, reports_masks)
                     ce_losses.update(loss.item(), images.size(0))
-                    if self.addcls:
-                        img_cls_loss = self.cls_criterion(logits, labels)
-                        loss = loss + self.cls_w * img_cls_loss
-                        img_cls_losses.update(img_cls_loss.item(), images.size(0))
+                    if self.att_cls:
+                        region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
+                        loss = loss + self.region_cls_w * region_cls_loss
+                        region_cls_losses.update(region_cls_loss.item(), images.size(0))
 
-                    if self.attn_cam:
-                        mse_loss = self.mse_criterion(total_attn, fore_map, logits, labels)
-                        loss = loss + self.mse_w * mse_loss
-                        mse_losses.update(mse_loss.item(), images.size(0))
+                    # if self.attn_cam:
+                    #     mse_loss = self.mse_criterion(total_attn, fore_map, logits, labels)
+                    #     loss = loss + self.mse_w * mse_loss
+                    #     mse_losses.update(mse_loss.item(), images.size(0))
 
 
                 self.scaler.scale(loss).backward()
@@ -334,7 +332,6 @@ class Trainer(BaseTrainer):
                 #     self.scaler.scale(self.cls_w * img_cls_loss).backward(retain_graph=self.attn_cam)
                 # if self.attn_cam:
                 #     self.scaler.scale(self.mse_w * mse_loss).backward()
-
 
                 self.scaler.unscale_(self.optimizer)
                 if self.clip_option == 'norm':
@@ -363,9 +360,9 @@ class Trainer(BaseTrainer):
                 norm_meter.update(grad_norm)
                 memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
                 #cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
-                pbar.set_postfix(ce_ls=f'{ce_losses.val:.4f} ({ce_losses.avg:.4f})\t',
-                                 cls_ls=f'{img_cls_losses.val:.4f} ({img_cls_losses.avg:.4f})\t',
-                                 mse_ls = f'{mse_losses.val:.4f} ({mse_losses.avg:.4f})\t',
+                pbar.set_postfix(ce=f'{ce_losses.val:.4f} ({ce_losses.avg:.4f})\t',
+                                 rg_cls=f'{region_cls_losses.val:.4f} ({region_cls_losses.avg:.4f})\t',
+                                 mse = f'{mse_losses.val:.4f} ({mse_losses.avg:.4f})\t',
                                  mem = f'mem {memory_used:.0f}MB',
                                  norm =f'{norm_meter.val:.4f} ({norm_meter.avg:.4f})')
                 pbar.update()
@@ -374,7 +371,7 @@ class Trainer(BaseTrainer):
                 #     exit()
             log = {'ce_loss': ce_losses.avg}
         self.writer.add_scalar('data/ce_loss', ce_losses.avg, epoch)
-        self.writer.add_scalar('data/cls_loss', img_cls_losses.avg, epoch)
+        self.writer.add_scalar('data/cls_loss', region_cls_losses.avg, epoch)
         self.writer.add_scalar('data/mse_loss', mse_losses.avg, epoch)
         # self.writer.add_scalar('data/std_fore', std_fores/len(self.train_dataloader), epoch)
         # self.writer.add_scalar('data/std_attn', std_attns/len(self.train_dataloader), epoch)
@@ -383,12 +380,13 @@ class Trainer(BaseTrainer):
 
     def _valid(self, epoch, split='test'):
         val_ce_losses = AverageMeter()
-        val_img_cls_losses = AverageMeter()
+        val_region_cls_losses = AverageMeter()
         val_mse_losses = AverageMeter()
         log = {}
         self.model.eval()
         dataloader = self.val_dataloader if split=='val' else self.test_dataloader
         device = self.model.device
+        region_preds, region_targets = [], []
 
         with tqdm(desc=f'Epoch %d - {split}' % epoch, unit='it', total=len(dataloader),
                   disable = dist.get_rank()!=self.local_rank) as pbar:
@@ -400,18 +398,29 @@ class Trainer(BaseTrainer):
                                                                  data['text'].to(device,non_blocking=True), \
                                                                  data['mask'].to(device,non_blocking=True)
                     total_attn, boxes, return_feats = None, None, None
+                    if self.att_cls:
+                        boxes, box_labels, region_labels = data['boxes'].to(device, non_blocking=True), \
+                                                           data['box_labels'].to(device, non_blocking=True), \
+                                                           data['region_labels'].to(device, non_blocking=True)
                     with autocast(dtype=torch.float16):
                         if split == 'val':
-                            if self.att_cls:
-                                out, logits = self.model(images, reports_ids, boxes=boxes, box_labels=box_labels,
-                                                            mode='train')
-                            else:
-                                out,patch_feats = self.model(images, reports_ids, mode='train',return_feats=True)
+                            out, region_logits, region_probs, patch_feats = self.model(images, reports_ids, boxes=boxes,
+                                                                                box_labels=box_labels,
+                                                                                mode='train',return_feats=True)
                             loss = self.criterion(out, reports_ids, reports_masks)
                             val_ce_losses.update(loss.item())
+                            if self.att_cls:
+                                val_region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
+                                val_region_cls_losses.update(val_region_cls_loss.item(), images.size(0))
+                                if len(region_preds)>0:
+                                    region_preds = torch.cat((region_preds,region_probs.cpu()),dim=0)
+                                    region_targets = torch.cat((region_targets,region_labels.cpu()),dim=0)
+                                else:
+                                    region_preds = region_probs.cpu()
+                                    region_targets = region_labels.cpu()
                         #output, _ = self.model(images,reports_ids,mode='sample')
                         else:
-                            patch_feats = self.model(images, reports_ids, mode='sample', return_feats=True)
+                            patch_feats, region_probs = self.model(images, reports_ids, mode='sample', return_feats=True)
                         output = self.beam_search.sample(self.model.module,patch_feats=patch_feats)
 
                     #     if total_attn is not None:
@@ -432,5 +441,8 @@ class Trainer(BaseTrainer):
                 log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
                 if split=='val':
                     log.update({'val_ce_loss':val_ce_losses.avg})
+                    region_auc = calculate_auc(preds=region_preds,targets=region_targets)
+                    if self.att_cls:
+                        log.update({'val_region_auc':region_auc,"val_rg_loss":val_region_cls_losses.avg})
         return log
 

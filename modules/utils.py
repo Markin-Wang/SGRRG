@@ -8,6 +8,7 @@ import numpy as np
 import os
 from math import inf
 import torch.nn as nn
+from sklearn.metrics import roc_auc_score
 
 def penalty_builder(penalty_config):
     if penalty_config == '':
@@ -61,172 +62,6 @@ def repeat_tensors(n, x):
     elif type(x) is list or type(x) is tuple:
         x = [repeat_tensors(n, _) for _ in x]
     return x
-
-def parse_args():
-    parser = argparse.ArgumentParser('Swin+M2 Transformer training and evaluation script', add_help=False)
-    parser.add_argument('--cfg', type=str, required=True, metavar="FILE", help='path to config file', )
-    parser.add_argument(
-        "--opts",
-        help="Modify config options by adding 'KEY VALUE' pairs. ",
-        default=None,
-        nargs='+',
-    )
-
-    # swin trans
-    parser.add_argument('--exp_name', type=str, default='m2_transformer_iu_xray')
-
-    parser.add_argument('--label_path', type=str, help='path to label')
-    parser.add_argument('--zip', action='store_true', help='use zipped dataset instead of folder dataset')
-    parser.add_argument('--cache-mode', type=str, default='no', choices=['no', 'full', 'part'],
-                        help='no: no cache, '
-                             'full: cache all data, '
-                             'part: sharding the dataset into nonoverlapping pieces and only cache one piece')
-    parser.add_argument('--pretrained',
-                        help='pretrained weight from checkpoint, could be imagenet22k pretrained weight')
-    parser.add_argument('--model_path', type =str,
-                        help='pretrained weight from checkpoint, could be imagenet22k pretrained weight')
-    parser.add_argument('--accumulation-steps', type=int, help="gradient accumulation steps")
-    parser.add_argument('--use_checkpoint', action='store_true',
-                        help="whether to use gradient checkpointing to save memory")
-    parser.add_argument('--amp_opt_level', type=str, default='O1', choices=['O0', 'O1', 'O2'],
-                        help='mixed precision opt level, if O0, no amp is used')
-    parser.add_argument('--output', default='output', type=str, metavar='PATH',
-                        help='root of output folder, the full path is <output>/<model_name>/<tag> (default: output)')
-    parser.add_argument('--tag', help='tag of experiment')
-    parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
-    parser.add_argument('--throughput', action='store_true', help='Test throughput only')
-    parser.add_argument('--ve_name', type=str, help='visual extractor name', default='swin_s')
-    parser.add_argument('--ed_name', type=str, help='visual extractor name', default='r2gen',
-                        choices=['r2gen', 'st_trans'])
-
-    # distributed training
-    parser.add_argument("--local_rank", type=int, default = 0, help='local rank for DistributedDataParallel')
-    parser.add_argument('--logs_folder', type=str, default='tensorboard_logs')
-
-
-    # Data input settings
-    parser.add_argument('--data_dir', type=str, default='data',
-                        help='the path to the directory containing the data.')
-
-    # Data loader settings
-    parser.add_argument('--dataset_name', type=str, default='iu_xray',
-                        choices=['iu_xray', 'mimic_cxr', 'chexpert', 'iu_xray_cls', 'mimic_cxr_cls', 'mimic_cxr_dsr2'],
-                        help='the dataset to be used.')
-    parser.add_argument('--max_seq_length', type=int, default=60, help='the maximum sequence length of the reports.')
-    parser.add_argument('--threshold', type=int, default=3, help='the cut off frequency for the words.')
-    parser.add_argument('--num_workers', type=int, default=16, help='the number of workers for dataloader.')
-    parser.add_argument('--batch_size', type=int, default=16, help='the number of samples for a batch')
-
-    # Model settings (for visual extractor)
-    parser.add_argument('--visual_extractor_pretrained', type=bool, default=True, help='whether to load the pretrained visual extractor')
-
-    # Model settings (for Transformer)
-    parser.add_argument('--d_model', type=int, default=512, help='the dimension of Transformer.')
-    parser.add_argument('--d_ff', type=int, default=512, help='the dimension of FFN.')
-    parser.add_argument('--d_vf', type=int, default=2048, help='the dimension of the patch features.')
-    parser.add_argument('--num_heads', type=int, default=8, help='the number of heads in Transformer.')
-    parser.add_argument('--num_layers_en', type=int, default=3, help='the number of encoder layers of Transformer.')
-    parser.add_argument('--num_layers_de', type=int, default=3, help='the number of decoder layers of Transformer.')
-    parser.add_argument('--dropout', type=float, default=0.1, help='the dropout rate of Transformer.')
-    parser.add_argument('--logit_layers', type=int, default=1, help='the number of the logit layer.')
-    parser.add_argument('--bos_idx', type=int, default=0, help='the index of <bos>.')
-    parser.add_argument('--eos_idx', type=int, default=0, help='the index of <eos>.')
-    parser.add_argument('--pad_idx', type=int, default=0, help='the index of <pad>.')
-    parser.add_argument('--use_bn', type=int, default=0, help='whether to use batch normalization.')
-    parser.add_argument('--drop_prob_lm', type=float, default=0.5, help='the dropout rate of the output layer.')
-    # for Relational Memory
-    parser.add_argument('--rm_num_slots', type=int, default=3, help='the number of memory slots.')
-    parser.add_argument('--rm_num_heads', type=int, default=8, help='the numebr of heads in rm.')
-    parser.add_argument('--rm_d_model', type=int, default=512, help='the dimension of rm.')
-
-    # Sample related
-    parser.add_argument('--sample_method', type=str, default='beam_search', help='the sample methods to sample a report.')
-    parser.add_argument('--beam_size', type=int, default=3, help='the beam size when beam searching.')
-    parser.add_argument('--temperature', type=float, default=1.0, help='the temperature when sampling.')
-    parser.add_argument('--sample_n', type=int, default=1, help='the sample number per image.')
-    parser.add_argument('--group_size', type=int, default=1, help='the group size.')
-    parser.add_argument('--warmup_ratio', type=float, default=10, help='warm up learning rate ratio.')
-    parser.add_argument('--warmup_epochs', type=int, default=5, help='warm up epochs.')
-    parser.add_argument('--output_logsoftmax', type=int, default=1, help='whether to output the probabilities.')
-    parser.add_argument('--decoding_constraint', type=int, default=0, help='whether decoding constraint.')
-    parser.add_argument('--block_trigrams', type=int, default=1, help='whether to use block trigrams.')
-
-    # Trainer settings
-    parser.add_argument('--n_gpu', type=int, default=1, help='the number of gpus to be used.')
-    parser.add_argument('--epochs', type=int, default=100, help='the number of training epochs.')
-    parser.add_argument('--save_dir', type=str, default='results/iu_xray', help='the patch to save the models.')
-    parser.add_argument('--record_dir', type=str, default='records/', help='the patch to save the results of experiments')
-    parser.add_argument('--save_period', type=int, default=1, help='the saving period.')
-    parser.add_argument('--monitor_mode', type=str, default='max', choices=['min', 'max'], help='whether to max or min the metric.')
-    parser.add_argument('--monitor_metric', type=str, default='BLEU_4', help='the metric to be monitored.')
-    parser.add_argument('--early_stop', type=int, default=50, help='the patience of training.')
-
-    # Optimization
-    parser.add_argument('--optim', type=str, default='Adam', help='the type of the optimizer.')
-    parser.add_argument('--lr_ve', type=float, default=5e-5, help='the learning rate for the visual extractor.')
-    parser.add_argument('--lr_ed', type=float, default=1e-4, help='the learning rate for the remaining parameters.')
-    parser.add_argument('--weight_decay', type=float, default=5e-5, help='the weight decay.')
-    parser.add_argument('--decay_epochs', type=int, default=10, help='the weight decay.')
-    parser.add_argument('--amsgrad', action='store_true', help='whether to use amsgrad in optimizer')
-
-    # Learning Rate Scheduler
-    parser.add_argument('--lr_scheduler', type=str, default='step', help='the type of the learning rate scheduler.')
-    parser.add_argument('--step_size', type=int, default=50, help='the step size of the learning rate scheduler.')
-    parser.add_argument('--img_size', type=int, default=224, help='the image size for ViT construction.')
-    parser.add_argument('--decay_rate', type=float, default=0.8, help='the gamma of the learning rate scheduler.')
-
-    # Others
-    parser.add_argument('--seed', type=int, default=9233, help='.')
-    parser.add_argument('--fp16', action = 'store_true', help='whether to use fp16 training')
-    parser.add_argument('--balanced', action = 'store_true', help='whether to use balanced sampler')
-    parser.add_argument('--finetune', action = 'store_true', help='whether to finetune model')
-    parser.add_argument('--cls', action = 'store_true', help='whether to perform classification')
-    parser.add_argument('--addcls', action = 'store_true', help='whether to add classification')
-    parser.add_argument('--randaug', action = 'store_true', help='whether to perform classification')
-    parser.add_argument('--resume', action = 'store_true', help='resume from checkpoint')
-    parser.add_argument('--fbl', action='store_true', help='foreground background representation learning')
-    parser.add_argument('--sub_back', action='store_true', help='whether sub background')
-    # parser.add_argument('--relu', action='store_true', help='whether to use relu in cam')
-    parser.add_argument('--attn_cam', action='store_true', help='whether to perform attn cam consistency')
-    # parser.add_argument('--norm_fbl', action='store_true', help='whether to perform norm in fore back learning')
-    parser.add_argument('--drop_fbl', action='store_true', help='whether to perform dropout in fore back learning')
-    parser.add_argument('--attn_method', type = str, default = 'mean', choices = ['mean', 'max'], help='method to generate the total attention map')
-    parser.add_argument('--early_exit', action = 'store_true', help = 'used for test')
-    # parser.add_argument('--clip_grad', action='store_true', help='whether to use clip grad')
-    parser.add_argument('--cls_w', type=float, default=0.5, help='the weight for classification loss')
-    parser.add_argument('--mse_w', type=float, default=0.5, help='the weight for mse loss')
-    parser.add_argument('--layer_id', type=int, default=2, choices=[0,1,2], help='the layer id in encoder to select attention')
-    parser.add_argument('--wmse', action='store_true', help='whether to use weighted mse')
-    parser.add_argument('--clip_value', type=float, default=0.1, help='the value for clip grad')
-    parser.add_argument('--clip_option', type=str, default='value', choices=['norm','mynorm', 'value','none'],
-                        help='the option for clip grad')
-    parser.add_argument('--topk', type=float, default=0.1, help='top k% in selected word attention')
-    parser.add_argument('--eps', type=float, default=1e-8, help='adam/adamw eps value')
-    parser.add_argument('--vis', action='store_true', help='vis attention weights, used in inference')
-    parser.add_argument('--fore_t', type=float, default=0.6, help='foreground threshold.')
-    parser.add_argument('--back_t', type=float, default=0.3, help='background threshold.')
-    parser.add_argument('--test', action='store_true', help='test_in_mimic_cxr')
-    parser.add_argument('--use_amp', action='store_true', help='whether to use amp')
-    parser.add_argument('--debug', action='store_true', help='debug mode')
-    parser.add_argument('--pe', type=str, default='none', choices=['ape','rpe','none'], help='whether to use absolute position embedding in encoder')
-    parser.add_argument('--num_patches', type=int, default=98, help='the number of image patches in encoder')
-    parser.add_argument('--block3', action='store_true', help='whether to only use 3 blocks in visual extractor')
-    parser.add_argument('--encode_text', action='store_true', help='whether to add text encoding')
-    parser.add_argument('--num_layers_ten', type=int, default=1, help='the number of layers for text encoder')
-    parser.add_argument('--cvt_attn', action='store_true', help='whether to replace the attn with cvt attn in encoder')
-    parser.add_argument('--stride_kv', type=int, default=1, help='stride_kv')
-    parser.add_argument('--stride_q', type=int, default=1, help='stride_q')
-    parser.add_argument('--padding_q', type=int, default=1, help='padding_q')
-    parser.add_argument('--padding_kv', type=int, default=1, help='padding_v')
-    parser.add_argument('--kernel_size', type=int, default=3, help='kernel_size')
-    parser.add_argument('--conv_embed', action='store_true', help='whether to use conv embedding')
-    parser.add_argument('--bwinit', action='store_true', help='whether to use biowordtovec to init embed')
-
-
-    args, unparsed = parser.parse_known_args()
-    config = get_config(args)
-    return args, config
-
 
 def load_pretrained(config, model, logger):
     logger.info(f"==============> Loading weight {config.MODEL.PRETRAINED} for fine-tuning......")
@@ -605,3 +440,14 @@ def init_weights(module):
 
     if isinstance(module, nn.Linear) and module.bias is not None:
         module.bias.data.zero_()
+
+def calculate_auc(preds, targets):
+    # preds: numpy array with shape [N samples, num_classes]
+    # target: the same shape as preds
+    if isinstance(preds,list):
+        preds, targets = np.array(preds), np.array(targets)
+    # filter all zero
+    mask = [i for i,target in enumerate(targets) if sum(target)!=0 ]
+    # imbalanced dataset, use macro
+    preds, targets = preds[mask,:], targets[mask,:]
+    return roc_auc_score(y_true=targets,y_score=preds,average='macro')

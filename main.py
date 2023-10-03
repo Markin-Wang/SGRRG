@@ -11,7 +11,7 @@ from modules.optimizers import build_optimizer, build_lr_scheduler
 from modules.trainer import Trainer
 from modules.loss import compute_loss
 from models.origin_model import RRGModel
-from modules.utils import parse_args, auto_resume_helper, load_checkpoint
+from modules.utils import auto_resume_helper, load_checkpoint
 from modules.logger import create_logger
 import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter

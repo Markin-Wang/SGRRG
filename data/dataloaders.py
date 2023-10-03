@@ -173,7 +173,7 @@ class R2DataLoader(DataLoader):
         keys = ['img_id', 'image', 'text', 'mask', 'seq_length']  # data used
 
         if 'boxes' in batch[0].keys():
-            keys.extend(['labels', 'boxes'])
+            keys.extend(['box_labels', 'boxes','region_labels','attribute_labels'])
 
         batch_dict = {key: [sample[key] for sample in batch] for key in keys}
 
@@ -196,7 +196,7 @@ class R2DataLoader(DataLoader):
         batch_dict['mask'] = torch.FloatTensor(targets_masks)
 
         if 'boxes' in batch[0].keys():
-            boxes, labels = batch_dict['boxes'],batch_dict['labels']
+            boxes, labels = batch_dict['boxes'],batch_dict['box_labels']
             boxes_, labels_ = [], []
             for i, (box, label) in enumerate(zip(boxes, labels)):
                 num_box = len(box)
@@ -206,8 +206,10 @@ class R2DataLoader(DataLoader):
                 boxes_.append(box_with_id)
                 labels_.append(torch.from_numpy(label))
             batch_dict['boxes'] = torch.cat(boxes_, dim=0)
-            batch_dict['labels'] = torch.cat(labels_, dim=0)
+            batch_dict['box_labels'] = torch.cat(labels_, dim=0)
 
+        if 'region_labels' in batch[0].keys():
+            batch_dict['region_labels'] = torch.cat(batch_dict['region_labels'], dim=0)
         return batch_dict
 
 

@@ -20,6 +20,7 @@ torchvision.disable_beta_transforms_warning()
 from torchvision import datapoints
 from torchvision.transforms.v2 import functional as F
 import torchvision.transforms.v2 as transforms
+from config import id2cat
 
 class BaseDatasetArrow(Dataset):
     def __init__(self, config, split, tokenizer, transform=None, text_column_name='caption', name=None, test=None):
@@ -34,6 +35,16 @@ class BaseDatasetArrow(Dataset):
         self.dsr = config['dsr']  # down sample rate
         root = os.path.join(config['data_dir'], config['dataset_name'])
         self.table = pa.ipc.RecordBatchFileReader(pa.memory_map(f"{root}/{name}.arrow", "r")).read_all()
+        self.name2label = {name:i for i,(name,_) in enumerate(id2cat)} # ensure the label setting consistency
+
+        self.text_column_name = text_column_name
+        # self.all_texts = self.table[text_column_name].to_pandas().tolist()
+        self.all_texts = self.table[text_column_name].to_pandas()
+
+        if split == 'train':
+            self.tokenizer = Tokenizer(config, self.all_texts)
+
+
         if self.dataset_name == 'mimic_cxr' and self.att_cls:
             # if self.split != 'train':
             #     img_filter_path = os.path.join(root, 'annotations', f"{name}.json")
@@ -48,33 +59,21 @@ class BaseDatasetArrow(Dataset):
             #         with pa.RecordBatchFileWriter(sink, self.table.schema) as writer:
             #             writer.write_table(self.table)
             #     print('after:', len(self.table['image_id']))
-            self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id.json')
-            self.attributes = json.loads(open(self.attributes_path, 'r').read())
-            self.att_labels = self.attributes['annotations']
-            self.att_cat_info = self.attributes['category_info']
-        self.text_column_name = text_column_name
-        # self.all_texts = self.table[text_column_name].to_pandas().tolist()
-        self.all_texts = self.table[text_column_name].to_pandas()
-
-        if split == 'train':
-            self.tokenizer = Tokenizer(config, self.all_texts)
-
-        if self.att_cls:
+            # Form box annotation
             if split == 'train':
                 ann_file_path = os.path.join(root, 'annotations', 'mimic_cxr_train.json')
             else:
                 ann_file_path = os.path.join(root, 'annotations', f'mimic_cxr_{split}_dino.json')
             self.data_infos = self.load_box_annotations(ann_file_path)
 
-        self.labels_path = os.path.join(root, config['label_path'])
-        self.labels = json.loads(open(self.labels_path, 'r').read())
 
-        self.to_tensor_trans = transforms.Compose([
-                transforms.ToImageTensor(),  # # note this does not scale the image
-                transforms.ConvertImageDtype(torch.float32),
-                transforms.Normalize((123.675, 116.28, 103.53),
-                                     (58.395, 57.12, 57.375))
-            ])
+            self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id.json')
+            self.attributes = json.loads(open(self.attributes_path, 'r').read())
+            self.attribute_anns, self.region_anns = self._parse_att_ann_info()
+            self.att_labels = self.attributes['annotations']
+            self.att_cat_info = self.attributes['category_info']
+
+
 
     def get_raw_image(self, index, image_key="image"):
         image_bytes = io.BytesIO(self.table[image_key][index].as_py())
@@ -98,6 +97,8 @@ class BaseDatasetArrow(Dataset):
                                                 )
                 image_tensor, box_ann = self.transform['common_aug'](image, {"boxes": bboxes, "labels": box_ann['labels']})
                 image_tensor =  self.transform['norm_to_tensor'](image_tensor)
+                region_labels = self.get_region_label(image_id=iid)
+                attribute_labels = self.get_attribute_label(image_id=iid)
             else:
                 image_tensor = self.transform['common_aug'](image)
                 image_tensor = self.transform['norm_to_tensor'](image_tensor)
@@ -108,17 +109,57 @@ class BaseDatasetArrow(Dataset):
             "raw_index": index,
         }
         if self.att_cls:
-            box_ann['labels'] = box_ann['labels']-1 # the category id for mimic cxr strats from 1
+            box_ann['box_labels'] = box_ann.pop('labels') - 1 # the category id for mimic cxr strats from 1
             return_dict.update(box_ann)
-        # image = self.get_raw_image(index, image_key=image_key)
-        # image_tensor = [tr(image) for tr in self.transforms]
+            return_dict.update({'region_labels':region_labels,"attribute_labels":attribute_labels})
+
         return return_dict
 
     def get_box(self, image_id):
         ann_ids = self.id2anns[image_id]
         ann_info = self.annotations[ann_ids]
         img_info = self.data_infos[image_id]
-        return self._parse_ann_info(img_info, ann_info)
+        return self._parse_box_ann_info(img_info, ann_info)
+
+    def get_region_label(self,image_id):
+        # some images without any regions mentioned, assign all zeros first,
+        # 614 images in training filter set no attributes
+        return self.region_anns.get(image_id,torch.zeros(1, len(id2cat)))
+
+    def get_attribute_label(self,image_id):
+        # some images without any regions mentioned, empty first
+        # may consider delete these images
+        # 614 images in training filter set no attributes
+        return self.attribute_anns.get(image_id, [])
+
+
+    def get_text(self, index):
+        text = self.all_texts[index][0]  # only one gt caption in rrg
+        encoding = self.tokenizer(text)[:self.max_seq_length]
+        mask = [1] * len(encoding)
+        gt_text = self.all_texts[index]
+        seq_length = len(encoding)
+        return {
+            "text": encoding,
+            "img_index": index,
+            "cap_index": index,
+            "mask": mask,
+            "raw_index": index,
+            "gt_txt": gt_text,
+            "seq_length": seq_length,
+        }
+
+    def get_suite(self, index):
+        ret = dict()
+        ret.update(self.get_image(index))
+        txt = self.get_text(index)
+        ret.update(txt)
+        return ret
+
+    def __len__(self):
+        return len(self.all_texts) // 1000  if self.debug and self.split=='train' else len(self.all_texts)
+
+
 
     def load_box_annotations(self, ann_file):
         """Load annotation from COCO style annotation file.
@@ -150,7 +191,7 @@ class BaseDatasetArrow(Dataset):
             total_ann_ids), f"Annotation ids in '{ann_file}' are not unique!"
         return data_infos
 
-    def _parse_ann_info(self, img_info, ann_info):
+    def _parse_box_ann_info(self, img_info, ann_info):
         """Parse bbox and mask annotation.
         Args:
             ann_info (list[dict]): Annotation info of an image.
@@ -247,33 +288,16 @@ class BaseDatasetArrow(Dataset):
             _bbox[3] - _bbox[1],
         ]
 
-    def get_text(self, index):
-        text = self.all_texts[index][0]  # only one gt caption in rrg
-        encoding = self.tokenizer(text)[:self.max_seq_length]
-        mask = [1] * len(encoding)
-        gt_text = self.all_texts[index]
-        seq_length = len(encoding)
-        return {
-            "text": encoding,
-            "img_index": index,
-            "cap_index": index,
-            "mask": mask,
-            "raw_index": index,
-            "gt_txt": gt_text,
-            "seq_length": seq_length,
-        }
 
-    def get_suite(self, index):
-        ret = dict()
-        ret.update(self.get_image(index))
-        txt = self.get_text(index)
-        ret.update(txt)
-        return ret
-
-    def __len__(self):
-        return len(self.all_texts) if not self.debug else len(self.all_texts) // 100
-
-
+    def _parse_att_ann_info(self):
+        attribute_anns = self.attributes['annotations']
+        region_anns = {}
+        for k,v in attribute_anns.items():
+            categories = [self.name2label[category] for category in v.keys()] # ensure the label consistency
+            region_label = torch.zeros(1, len(id2cat))
+            region_label[0, categories] = 1.0
+            region_anns[k] = region_label
+        return attribute_anns, region_anns
 
 
 

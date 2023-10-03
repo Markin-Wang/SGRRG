@@ -136,8 +136,9 @@ def config():
 
     # attribute classification setting
     feature_size = image_size // 32 # 32 is the downsampling rate for the visual extractor
-    output_size = 3
+    output_size = 2
     num_classes = 29 # the number of anatomical locations
+    region_select_threshold = 0.5 # the threshold used to select the region after sigmoid
 
     save_period = 1
     monitor_mode = 'max'
@@ -178,7 +179,7 @@ def config():
     drop_fbl = False
     attn_method = False
     early_exit = False  # used for test
-    cls_w = 0.5
+    region_cls_w = 0.5
     wmse = 0.5
     layer_id = 2  # the layer id in encoder to select attention
     topk = 0.1

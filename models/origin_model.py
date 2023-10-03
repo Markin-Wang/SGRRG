@@ -13,6 +13,7 @@ from modules.utils import load_ape
 from modules.standard_trans import subsequent_mask
 from modules.utils import init_weights
 from .attribute_predictor import AttributePredictor
+from .region_selector import RegionSelector
 
 class RRGModel(nn.Module):
     def __init__(self, tokenizer, logger=None, config=None):
@@ -22,9 +23,7 @@ class RRGModel(nn.Module):
         self.vis = config['vis']
         self.tokenizer = tokenizer
         self.visual_extractor = VisualExtractor(logger, config)
-        self.fbl = config['fbl']
-        self.wmse = config['wmse']
-        self.attn_cam = config['attn_cam']
+        self.region_select_threshold = config['region_select_threshold']
 
         self.sub_back = config['sub_back']
         self.records = []
@@ -36,7 +35,8 @@ class RRGModel(nn.Module):
         self.encoder_decoder = st_trans(config)
 
         if self.att_cls:
-            self.region_selector = nn.Linear(config['d_vf'],config['num_classes'])
+            self.region_selector = RegionSelector(config)
+
             self.attribute_predictor = AttributePredictor(config)
 
         # self.scene_graph_encoder =
@@ -68,20 +68,23 @@ class RRGModel(nn.Module):
 
 
     def forward(self, images, targets=None, boxes=None, box_labels=None, return_feats=False,mode='sample'):
-        fore_map, total_attns, weights, attns, idxs, align_attns_train = None, None, None, None, None, None
+        region_logits, region_probs = None, None
 
-        patch_feats, _ = self.extract_img_feats(images)
+        patch_feats, gbl_feats = self.extract_img_feats(images)
         if self.att_cls:
-            logits = self.attribute_predictor(patch_feats,boxes,box_labels)
+            region_logits = self.region_selector(gbl_feats)
+            if mode != 'train' or return_feats:
+                region_probs = torch.sigmoid(region_logits) > 0.5
+            # attribute_logits = self.attribute_predictor(patch_feats,boxes,box_labels)
 
         encoded_img_feats, seq, att_masks, seq_mask = self.encode_img_feats(patch_feats, targets)
 
         if mode == 'train':
             output, align_attns = self.encoder_decoder(encoded_img_feats, seq, att_masks, seq_mask)
-            if return_feats: return output, encoded_img_feats
-            return output
+            if return_feats: return output, region_logits, region_probs, encoded_img_feats
+            return output, region_logits
         elif mode == 'sample':
-            return encoded_img_feats
+            return encoded_img_feats, region_probs
         else:
             raise ValueError
 
