@@ -12,7 +12,7 @@ def build_optimizer(model, config):
     #     cvt_attn_id = list(map(id,cvt_attn_params))
     new_params = filter(lambda x: id(x) not in ve_params, model.parameters())
     params = [{'params': model.visual_extractor.parameters(), 'lr': config['lr_base']},
-             {'params': new_params, 'lr': config['lr_ed'] * config['mul_new']}]
+             {'params': new_params, 'lr': config['lr_base'] * config['mul_new']}]
     # if config.TRAIN.CVT_ATTN:
     #     params += [{'params': cvt_attn_params, 'lr': 5 * config.TRAIN.ED_BASE_LR}]
 
