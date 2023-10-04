@@ -37,7 +37,7 @@ class RRGModel(nn.Module):
         if self.att_cls:
             self.region_selector = RegionSelector(config)
 
-            self.attribute_predictor = AttributePredictor(config)
+            #self.attribute_predictor = AttributePredictor(config)
 
         # self.scene_graph_encoder =
        # if self.att_cls:
