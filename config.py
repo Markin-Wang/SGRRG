@@ -108,8 +108,8 @@ def config():
     decoding_constraint = 0
     block_trigrams = 1
     optim = 'AdamW'
-    lr_ve = 5e-5
-    lr_ed = 1e-4
+    lr_base = 5e-5
+    mul_new = 2   # lr_base * mul_new for new parameters
     weight_decay = 5e-5
     decay_epochs = 10
     amsgrad = False
@@ -196,8 +196,8 @@ def task_train_caption_iu():
     threshold = 3
     batch_size = 8
     epochs = 40
-    lr_ve = 1e-3
-    lr_ed = 2e-3
+    lr_base = 1e-3
+    mul_new = 2
     img_backbone = 'swin_base_patch4_window7_224_in22k'
     d_vf = 1024
     ed_name = 'st_trans'
@@ -214,8 +214,8 @@ def task_train_caption_mimic():
     threshold = 10
     batch_size = 16
     epochs = 30
-    lr_ve = 5e-5
-    lr_ed = 1e-4
+    lr_base = 5e-5
+    mul_new = 2
     img_backbone = 'swin_base_patch4_window12_384_in22k'
     resolution_before = 384
     image_size = 384
