@@ -70,13 +70,14 @@ def build_lr_scheduler(config, optimizer, n_iter_per_epoch):
     decay_steps = int(config['decay_epochs'] * n_iter_per_epoch)
     warmup_steps = int(config['warmup_epochs'] * n_iter_per_epoch)
     lr_scheduler = None
+    lr_base = config['lr_base']
     if config['lr_scheduler'] == 'cosine':
         lr_scheduler = CosineLRScheduler(
             optimizer,
             t_initial=num_steps,
             t_mul=1.,
-            lr_min=config['lr_ve']/config['warmup_ratio'],
-            warmup_lr_init=config['lr_ve']/config['warmup_ratio'],
+            lr_min=lr_base/config['warmup_ratio'],
+            warmup_lr_init=lr_base/config['warmup_ratio'],
             warmup_t=warmup_steps,
             cycle_limit=1,
             t_in_epochs=False,
@@ -85,8 +86,8 @@ def build_lr_scheduler(config, optimizer, n_iter_per_epoch):
         lr_scheduler = LinearLRScheduler(
             optimizer,
             t_initial=num_steps,
-            lr_min_rate=config['lr_ve']/config['warmup_ratio'],
-            warmup_lr_init=config['lr_ve']/config['warmup_ratio'],
+            lr_min_rate=lr_base/config['warmup_ratio'],
+            warmup_lr_init=lr_base/config['warmup_ratio'],
             warmup_t=warmup_steps,
             t_in_epochs=False,
         )
@@ -95,7 +96,7 @@ def build_lr_scheduler(config, optimizer, n_iter_per_epoch):
             optimizer,
             decay_t=decay_steps,
             decay_rate=config['decay_rate'],
-            warmup_lr_init=config['lr_ve']/config['warmup_ratio'],
+            warmup_lr_init=lr_base/config['warmup_ratio'],
             warmup_t=warmup_steps,
             t_in_epochs=False,
         )
