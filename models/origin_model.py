@@ -74,7 +74,7 @@ class RRGModel(nn.Module):
         if self.att_cls:
             region_logits = self.region_selector(gbl_feats)
             if mode != 'train' or return_feats:
-                region_probs = torch.sigmoid(region_logits) > 0.5
+                region_probs = torch.sigmoid(region_logits)
             # attribute_logits = self.attribute_predictor(patch_feats,boxes,box_labels)
 
         encoded_img_feats, seq, att_masks, seq_mask = self.encode_img_feats(patch_feats, targets)

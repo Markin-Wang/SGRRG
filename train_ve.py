@@ -7,7 +7,6 @@ import random
 import numpy as np
 
 from datetime import timedelta
-from modules.datasets import ChexPert
 from torch.utils.data import DataLoader
 from modules.dataloaders import R2DataLoader
 from modules.tokenizers_origin import Tokenizer
@@ -15,7 +14,6 @@ import json
 from sklearn import metrics
 from torchvision import transforms
 import PIL
-from modules.balanced_sampler import MultilabelBalancedRandomSampler
 
 import torch
 import torch.distributed as dist

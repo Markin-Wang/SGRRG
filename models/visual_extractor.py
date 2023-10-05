@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss, Dropout, Softmax, Linear, Conv2d, LayerNorm
 from .swin_helpers import swin_adapt_position_encoding
 from . import swin_transformer as swin
+from .region_selector import RegionSelector
 
 weight_mapping = {
     # 'efficientnet_b5':models.EfficientNet_B5_Weights.IMAGENET1K_V1,
@@ -70,6 +71,12 @@ class VisualExtractor(nn.Module):
 
         else:
             raise NotImplementedError
+
+        self.region_cls_only = config['region_cls_only']
+
+        if self.region_cls_only:
+            self.region_selector = RegionSelector(config)
+
 
         # trunc_normal_(self.head.weight, std=1 / math.sqrt(self.num_features * n_classes))
         # nn.init.constant_(self.head.bias, 0)
@@ -142,5 +149,11 @@ class VisualExtractor(nn.Module):
                 patch_feats = patch_feats.reshape(batch_size, feat_size, -1).permute(0, 2, 1)
             else:
                 patch_feats, avg_feats = None, None
+
+        if self.region_cls_only:
+            region_logits = self.region_selector(avg_feats)
+            if mode != 'train':
+                return region_logits, torch.sigmoid(region_logits)
+            return region_logits
 
         return patch_feats, avg_feats
