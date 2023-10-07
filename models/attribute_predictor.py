@@ -23,7 +23,7 @@ class AttributePredictor(nn.Module):
             v.apply(init_weights)
         self.attribute_heads = nn.ModuleList(attribute_heads)
 
-    def forward(self,x, boxes, box_labels):
+    def forward(self,x, boxes, box_labels,region_probs=None):
         bs, num_tokens, feat_size = x.shape
         x = x.transpose(1, 2).reshape(bs,feat_size,int(num_tokens**0.5),int(num_tokens**0.5)) # transform to shape [BS,C,H,W]
         x = self.roi_pool(x,boxes) # box feasts, N x C x output_size x output_size

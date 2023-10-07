@@ -35,6 +35,7 @@ class BaseDatasetArrow(Dataset):
         self.dsr = config['dsr']  # down sample rate
         root = os.path.join(config['data_dir'], config['dataset_name'])
         self.table = pa.ipc.RecordBatchFileReader(pa.memory_map(f"{root}/{name}.arrow", "r")).read_all()
+        self.num_attributes = config['num_attributes']
         self.name2label = {name:i for i,(name,_) in enumerate(id2cat)} # ensure the label setting consistency
 
         self.text_column_name = text_column_name
@@ -46,33 +47,37 @@ class BaseDatasetArrow(Dataset):
 
 
         if self.dataset_name == 'mimic_cxr' and self.att_cls:
-            # if self.split != 'train':
-            #     img_filter_path = os.path.join(root, 'annotations', f"{name}.json")
-            #     with open(img_filter_path, 'r') as f:
-            #         img_filter_dict = json.load(f)
-            #     img_keys = set([img['id'] for img in img_filter_dict['images']])
-            #     print(img_filter_dict.keys())
-            #     mask = [self.table['image_id'][i].as_py() in img_keys for i in range(len(self.table['image_id']))]
-            #     print('before:', len(self.table['image_id']))
-            #     self.table = self.table.filter(mask)
-            #     with pa.OSFile(os.path.join(root, f'mimic_cxr_{split}_filter.arrow'), "wb") as sink:
-            #         with pa.RecordBatchFileWriter(sink, self.table.schema) as writer:
-            #             writer.write_table(self.table)
-            #     print('after:', len(self.table['image_id']))
+            # if self.split == 'train':
+                # 159434 training images both in chest vg mimic-cxr training set
+                #
+                # img_filter_path = os.path.join(root, 'annotations', f"{name}.json")
+                # with open(img_filter_path, 'r') as f:
+                #     img_filter_dict = json.load(f)
+                # img_keys = set([img['id'] for img in img_filter_dict['images']])
+                # print(img_filter_dict.keys())
+                # filter training images based on no attributes get 158794 images
+                # no_attribute_ids = set(json.load(open(os.path.join(root, 'annotations', "no_attribute_ids.json"), 'r')))
+                # mask = [self.table['image_id'][i].as_py() not in no_attribute_ids for i in range(len(self.table['image_id']))]
+                # print('before:', len(self.table['image_id']))
+                # self.table = self.table.filter(mask)
+                # with pa.OSFile(os.path.join(root, f'mimic_cxr_{split}_filter_att.arrow'), "wb") as sink:
+                #     with pa.RecordBatchFileWriter(sink, self.table.schema) as writer:
+                #         writer.write_table(self.table)
+                # print('after:', len(self.table['image_id']))
+                # exit()
             # Form box annotation
+
             if split == 'train':
                 ann_file_path = os.path.join(root, 'annotations', 'mimic_cxr_train.json')
             else:
                 ann_file_path = os.path.join(root, 'annotations', f'mimic_cxr_{split}_dino.json')
-            self.data_infos = self.load_box_annotations(ann_file_path)
+            self.box_infos = self.load_box_annotations(ann_file_path)
 
-
-            self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id.json')
+            self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_1head.json')
             self.attributes = json.loads(open(self.attributes_path, 'r').read())
             self.attribute_anns, self.region_anns = self._parse_att_ann_info()
             self.att_labels = self.attributes['annotations']
-            self.att_cat_info = self.attributes['category_info']
-
+            self.att_cat_info = self.attributes['attribute_info']
 
 
     def get_raw_image(self, index, image_key="image"):
@@ -99,6 +104,10 @@ class BaseDatasetArrow(Dataset):
                 image_tensor =  self.transform['norm_to_tensor'](image_tensor)
                 region_labels = self.get_region_label(image_id=iid)
                 attribute_labels = self.get_attribute_label(image_id=iid)
+
+                # box masks are used to determine which mask will be selected
+                # to perform scene graph embedding and attribute prediction
+                box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
             else:
                 image_tensor = self.transform['common_aug'](image)
                 image_tensor = self.transform['norm_to_tensor'](image_tensor)
@@ -109,7 +118,7 @@ class BaseDatasetArrow(Dataset):
             "raw_index": index,
         }
         if self.att_cls:
-            box_ann['box_labels'] = box_ann.pop('labels') - 1 # the category id for mimic cxr strats from 1
+            box_ann['box_labels'] = box_ann.pop('labels')
             return_dict.update(box_ann)
             return_dict.update({'region_labels':region_labels,"attribute_labels":attribute_labels})
 
@@ -117,14 +126,19 @@ class BaseDatasetArrow(Dataset):
 
     def get_box(self, image_id):
         ann_ids = self.id2anns[image_id]
-        ann_info = self.annotations[ann_ids]
-        img_info = self.data_infos[image_id]
+        ann_info = self.box_annotations[ann_ids]
+        img_info = self.box_infos[image_id]
         return self._parse_box_ann_info(img_info, ann_info)
 
     def get_region_label(self,image_id):
         # some images without any regions mentioned, assign all zeros first,
         # 614 images in training filter set no attributes
         return self.region_anns.get(image_id,torch.zeros(1, len(id2cat)))
+
+    def get_box_mask(self,box_labels,region_labels):
+        box_masks = (region_labels[0,box_labels] == 1).float()
+        return box_masks
+
 
     def get_attribute_label(self,image_id):
         # some images without any regions mentioned, empty first
@@ -171,25 +185,25 @@ class BaseDatasetArrow(Dataset):
         with open(ann_file, 'r') as f:
             self.mimic_cxr = json.load(f)
         self.id2anns = {}
-        self.annotations = np.array(self.mimic_cxr['annotations'])
+        self.box_annotations = np.array(self.mimic_cxr['annotations'])
         self.catToImgs = defaultdict(list)
-        for ann in self.annotations:
+        for ann in self.box_annotations:
             self.catToImgs[ann['category_id']].append(ann['image_id'])
         # The order of returned `cat_ids` will not
         # change with the order of the CLASSES
         self.cat_ids = [cat_info['id'] for cat_info in self.mimic_cxr['categories']]
-        self.cat2label = {cat_id: i for i, cat_id in enumerate(self.cat_ids)}
-        data_infos = {}
+        self.cat2label = {cat_id: i for i, cat_id in enumerate(self.cat_ids)} # ensure label consistency for all processing
+        box_infos = {}
         total_ann_ids = []
         for img_info in self.mimic_cxr['images']:
             img_info['filename'] = img_info['file_name']
             ann_ids = img_info['ann_ids']
-            data_infos[img_info['id']] = img_info
+            box_infos[img_info['id']] = img_info
             self.id2anns[img_info['id']] = ann_ids
             total_ann_ids.extend(ann_ids)
         assert len(set(total_ann_ids)) == len(
             total_ann_ids), f"Annotation ids in '{ann_file}' are not unique!"
-        return data_infos
+        return box_infos
 
     def _parse_box_ann_info(self, img_info, ann_info):
         """Parse bbox and mask annotation.
@@ -290,13 +304,18 @@ class BaseDatasetArrow(Dataset):
 
 
     def _parse_att_ann_info(self):
-        attribute_anns = self.attributes['annotations']
+        anns = self.attributes['annotations'][self.split]
+        attribute_anns = {}
         region_anns = {}
-        for k,v in attribute_anns.items():
-            categories = [self.name2label[category] for category in v.keys()] # ensure the label consistency
-            region_label = torch.zeros(1, len(id2cat))
-            region_label[0, categories] = 1.0
-            region_anns[k] = region_label
+        num_regions = len(id2cat)
+        for k,v in anns.items():
+            region_label = v['region_label']
+            region_label_ = torch.zeros(1, num_regions)
+            region_label_[0, region_label] = 1.0 # ensure the label consistency
+            region_anns[k] = region_label_
+            v.pop('region_label')
+            attribute_anns[k] = {self.name2label[kk]:vv for kk,vv in v.items()}
+            # transform to muli-hot vetor in collate_fn as too many classes, otherwise occpuy a large RAM
         return attribute_anns, region_anns
 
 

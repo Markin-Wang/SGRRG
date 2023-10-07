@@ -173,7 +173,13 @@ class R2DataLoader(DataLoader):
         keys = ['img_id', 'image', 'text', 'mask', 'seq_length']  # data used
 
         if 'boxes' in batch[0].keys():
-            keys.extend(['box_labels', 'boxes','region_labels','attribute_labels'])
+            keys.extend(['box_labels', 'boxes'])
+
+        if 'region_labels' in batch[0].keys():
+            keys.extend(['region_labels', 'box_masks'])
+
+        if 'attribute_labels' in batch[0].keys():
+            keys.extend(['attribute_labels'])
 
         batch_dict = {key: [sample[key] for sample in batch] for key in keys}
 
@@ -205,11 +211,33 @@ class R2DataLoader(DataLoader):
                 box_with_id[:, 1:] = box
                 boxes_.append(box_with_id)
                 labels_.append(torch.from_numpy(label))
+
             batch_dict['boxes'] = torch.cat(boxes_, dim=0)
             batch_dict['box_labels'] = torch.cat(labels_, dim=0)
 
         if 'region_labels' in batch[0].keys():
             batch_dict['region_labels'] = torch.cat(batch_dict['region_labels'], dim=0)
+            batch_dict['box_masks'] = torch.cat(batch_dict['box_masks'],dim=0)
+
+        if 'attribute_labels' in batch[0].keys():
+            attribute_labels = []
+            attribute_masks = torch.ones(len(batch))
+            selected_box_labels = batch_dict['box_labels'][batch_dict['box_masks'] == 1]
+            selected_boxes_bsid = batch_dict['boxes'][batch_dict['box_masks'] == 1, 0]
+            for i,attribute_label in enumerate(batch_dict['attribute_labels']):
+                i_box_labels = selected_box_labels[selected_boxes_bsid==i]
+                if len(attribute_label) == 0:
+                    attribute_masks[i] = 0
+                    attribute_labels.append([])
+                    continue
+                for box_label in i_box_labels:
+                    temp_label = attribute_label[box_label.item()]
+                    attribute_label_ = torch.zeros(1,884) # 884 attributes
+                    attribute_label_[0,temp_label] = 1.0
+                    attribute_labels.append(attribute_label_)
+            batch_dict['attribute_labels'] = attribute_labels
+            batch_dict['attribute_masks'] = attribute_masks
+
         return batch_dict
 
 

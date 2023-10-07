@@ -139,7 +139,9 @@ def config():
     output_size = 2
     num_classes = 29 # the number of anatomical locations
     region_select_threshold = 0.5 # the threshold used to select the region after sigmoid
-    region_cls_only = False
+    region_cls_only = False # perform region classification in visual extractor
+    region_cls = False
+    num_attributes = 884 # for one head attribute classification
 
     save_period = 1
     monitor_mode = 'max'

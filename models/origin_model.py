@@ -28,16 +28,19 @@ class RRGModel(nn.Module):
         self.sub_back = config['sub_back']
         self.records = []
         self.att_cls = config['att_cls']
+        self.region_cls = config['region_cls']
         # if config['ed_name'] == 'r2gen':
         #     self.encoder_decoder = r2gen(config, tokenizer)
         # elif config['ed_name'] == 'st_trans':
 
         self.encoder_decoder = st_trans(config)
 
-        if self.att_cls:
+        if self.region_cls:
             self.region_selector = RegionSelector(config)
 
-            #self.attribute_predictor = AttributePredictor(config)
+        if self.att_cls:
+            assert self.region_cls, "To perform attribute classification, region classification should be enabled."
+            self.attribute_predictor = AttributePredictor(config)
 
         # self.scene_graph_encoder =
        # if self.att_cls:
@@ -71,11 +74,16 @@ class RRGModel(nn.Module):
         region_logits, region_probs = None, None
 
         patch_feats, gbl_feats = self.extract_img_feats(images)
-        if self.att_cls:
+        if self.region_cls:
             region_logits = self.region_selector(gbl_feats)
             if mode != 'train' or return_feats:
                 region_probs = torch.sigmoid(region_logits)
-            # attribute_logits = self.attribute_predictor(patch_feats,boxes,box_labels)
+
+        if self.att_cls:
+            if mode != 'train' or return_feats:
+                box_feats, attribute_ids = self.attribute_predictor(patch_feats,boxes,box_labels,region_probs=region_probs)
+            else:
+                box_feats, attribute_ids = self.attribute_predictor(patch_feats, boxes, box_labels)
 
         encoded_img_feats, seq, att_masks, seq_mask = self.encode_img_feats(patch_feats, targets)
 

@@ -8,7 +8,7 @@ class MIMICMultiImageDatasetArrow(BaseDatasetArrow):
         self.split = split
 
         if split == "train":
-            name = "mimic_cxr_train_filter"
+            name = "mimic_cxr_train_filter_att"
         elif split == "val":
             name = "mimic_cxr_val"
         elif split == "test":

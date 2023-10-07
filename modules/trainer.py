@@ -56,7 +56,7 @@ class BaseTrainer(object):
         self.optimizer = optimizer
         self.scaler = GradScaler(enabled=self.use_amp, init_scale = 256)
 
-
+        self.region_cls = config['region_cls']
         self.clip_option = config['clip_option']
         if self.att_cls:
             self.region_cls_criterion = torch.nn.BCEWithLogitsLoss()
@@ -397,7 +397,7 @@ class Trainer(BaseTrainer):
                     images, reports_ids, reports_masks = data['image'].to(device,non_blocking=True), \
                                                                  data['text'].to(device,non_blocking=True), \
                                                                  data['mask'].to(device,non_blocking=True)
-                    total_attn, boxes, return_feats = None, None, None
+                    total_attn, boxes, return_feats, box_labels = None, None, None, None
                     if self.att_cls:
                         boxes, box_labels, region_labels = data['boxes'].to(device, non_blocking=True), \
                                                            data['box_labels'].to(device, non_blocking=True), \
@@ -441,8 +441,8 @@ class Trainer(BaseTrainer):
                 log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
                 if split=='val':
                     log.update({'val_ce_loss':val_ce_losses.avg})
-                    region_auc = calculate_auc(preds=region_preds,targets=region_targets)
-                    if self.att_cls:
+                    if self.region_cls:
+                        region_auc = calculate_auc(preds=region_preds, targets=region_targets)
                         log.update({'val_region_auc':region_auc,"val_rg_loss":val_region_cls_losses.avg})
         return log
 
