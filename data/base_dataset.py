@@ -32,6 +32,7 @@ class BaseDatasetArrow(Dataset):
         self.debug = config['debug']
         self.dataset_name = config['dataset_name']
         self.att_cls = config['att_cls']
+        self.region_cls = config['region_cls']
         self.dsr = config['dsr']  # down sample rate
         root = os.path.join(config['data_dir'], config['dataset_name'])
         self.table = pa.ipc.RecordBatchFileReader(pa.memory_map(f"{root}/{name}.arrow", "r")).read_all()
@@ -46,7 +47,7 @@ class BaseDatasetArrow(Dataset):
             self.tokenizer = Tokenizer(config, self.all_texts)
 
 
-        if self.dataset_name == 'mimic_cxr' and self.att_cls:
+        if self.dataset_name == 'mimic_cxr' and self.region_cls:
             # if self.split == 'train':
                 # 159434 training images both in chest vg mimic-cxr training set
                 #
@@ -73,6 +74,7 @@ class BaseDatasetArrow(Dataset):
                 ann_file_path = os.path.join(root, 'annotations', f'mimic_cxr_{split}_dino.json')
             self.box_infos = self.load_box_annotations(ann_file_path)
 
+
             self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_1head.json')
             self.attributes = json.loads(open(self.attributes_path, 'r').read())
             self.attribute_anns, self.region_anns = self._parse_att_ann_info()
@@ -95,7 +97,7 @@ class BaseDatasetArrow(Dataset):
             image_tensor = torch.stack(image_tensor1 + image_tensor2, dim=0)
         else:
             image = self.get_raw_image(index, image_key=image_key)
-            if self.att_cls:
+            if self.region_cls:
                 box_ann = self.get_box(iid)
                 bboxes = datapoints.BoundingBox(box_ann['bboxes'], format=datapoints.BoundingBoxFormat.XYXY,
                                                 spatial_size=box_ann['spatial_size']
@@ -103,11 +105,12 @@ class BaseDatasetArrow(Dataset):
                 image_tensor, box_ann = self.transform['common_aug'](image, {"boxes": bboxes, "labels": box_ann['labels']})
                 image_tensor =  self.transform['norm_to_tensor'](image_tensor)
                 region_labels = self.get_region_label(image_id=iid)
+                box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
+            if self.att_cls:
                 attribute_labels = self.get_attribute_label(image_id=iid)
 
                 # box masks are used to determine which mask will be selected
                 # to perform scene graph embedding and attribute prediction
-                box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
             else:
                 image_tensor = self.transform['common_aug'](image)
                 image_tensor = self.transform['norm_to_tensor'](image_tensor)
@@ -117,10 +120,13 @@ class BaseDatasetArrow(Dataset):
             "img_index": index,
             "raw_index": index,
         }
-        if self.att_cls:
+        if self.region_cls:
             box_ann['box_labels'] = box_ann.pop('labels')
             return_dict.update(box_ann)
-            return_dict.update({'region_labels':region_labels,"attribute_labels":attribute_labels})
+            return_dict.update({'region_labels':region_labels})
+
+        if self.att_cls:
+            return_dict.update({"attribute_labels": attribute_labels})
 
         return return_dict
 

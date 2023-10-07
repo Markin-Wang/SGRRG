@@ -58,7 +58,7 @@ class BaseTrainer(object):
 
         self.region_cls = config['region_cls']
         self.clip_option = config['clip_option']
-        if self.att_cls:
+        if self.region_cls:
             self.region_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.region_cls_w = config['region_cls_w']
 
@@ -306,7 +306,7 @@ class Trainer(BaseTrainer):
                                                      data['text'].to(device,non_blocking=True), \
                                                      data['mask'].to(device,non_blocking=True)
                 boxes, box_labels, region_labels = None, None, None
-                if self.att_cls:
+                if self.region_cls:
                     boxes, box_labels,region_labels = data['boxes'].to(device,non_blocking=True), \
                                                       data['box_labels'].to(device,non_blocking=True), \
                                                       data['region_labels'].to(device, non_blocking=True)
@@ -316,7 +316,7 @@ class Trainer(BaseTrainer):
                     output, region_logits = self.model(images, reports_ids,boxes=boxes, box_labels=box_labels,mode='train')
                     loss = self.criterion(output, reports_ids, reports_masks)
                     ce_losses.update(loss.item(), images.size(0))
-                    if self.att_cls:
+                    if self.region_cls:
                         region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
                         loss = loss + self.region_cls_w * region_cls_loss
                         region_cls_losses.update(region_cls_loss.item(), images.size(0))
@@ -398,7 +398,7 @@ class Trainer(BaseTrainer):
                                                                  data['text'].to(device,non_blocking=True), \
                                                                  data['mask'].to(device,non_blocking=True)
                     total_attn, boxes, return_feats, box_labels = None, None, None, None
-                    if self.att_cls:
+                    if self.region_cls:
                         boxes, box_labels, region_labels = data['boxes'].to(device, non_blocking=True), \
                                                            data['box_labels'].to(device, non_blocking=True), \
                                                            data['region_labels'].to(device, non_blocking=True)
@@ -409,7 +409,7 @@ class Trainer(BaseTrainer):
                                                                                 mode='train',return_feats=True)
                             loss = self.criterion(out, reports_ids, reports_masks)
                             val_ce_losses.update(loss.item())
-                            if self.att_cls:
+                            if self.region_cls:
                                 val_region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
                                 val_region_cls_losses.update(val_region_cls_loss.item(), images.size(0))
                                 if len(region_preds)>0:
