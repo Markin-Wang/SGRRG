@@ -303,7 +303,7 @@ class Trainer(BaseTrainer):
                 images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
                                                      data['text'].to(device, non_blocking=True), \
                                                      data['mask'].to(device, non_blocking=True)
-                boxes, box_labels, region_labels = None, None, None
+                boxes, box_labels, region_labels, box_masks = None, None, None, None
                 if self.region_cls:
                     boxes, box_labels, box_masks, region_labels = data['boxes'].to(device, non_blocking=True), \
                                                                   data['box_labels'].to(device, non_blocking=True), \
@@ -312,53 +312,53 @@ class Trainer(BaseTrainer):
                     if self.att_cls:
                         attribute_labels = data['attribute_labels'].to(device, non_blocking=True)
 
-            self.optimizer.zero_grad()
-            with autocast(dtype=torch.float16):
-                # region logits is None when att_cls disabled
-                output = self.model(images, reports_ids, boxes=boxes, box_labels=box_labels, box_masks=box_masks,
-                                    mode='train')
-                rrg_preds = output['rrg_preds']
-                loss = self.criterion(rrg_preds, reports_ids, reports_masks)
-                ce_losses.update(loss.item(), images.size(0))
-                if self.region_cls:
-                    region_logits = output['region_logits']
-                    region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
-                    loss = loss + self.region_cls_w * region_cls_loss
-                    region_cls_losses.update(region_cls_loss.item(), images.size(0))
+                self.optimizer.zero_grad()
+                with autocast(dtype=torch.float16):
+                    # region logits is None when att_cls disabled
+                    output = self.model(images, reports_ids, boxes=boxes, box_labels=box_labels, box_masks=box_masks,
+                                        mode='train')
+                    rrg_preds = output['rrg_preds']
+                    loss = self.criterion(rrg_preds, reports_ids, reports_masks)
+                    ce_losses.update(loss.item(), images.size(0))
+                    if self.region_cls:
+                        region_logits = output['region_logits']
+                        region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
+                        loss = loss + self.region_cls_w * region_cls_loss
+                        region_cls_losses.update(region_cls_loss.item(), images.size(0))
 
-                if self.att_cls:
-                    attribute_logits = output['att_logits']
-                    attribute_cls_loss = self.att_cls_criterion(attribute_logits, attribute_labels)
-                    loss = loss + self.att_cls_w * attribute_cls_loss
-                    attribute_cls_losses.update(attribute_cls_loss.item(), images.size(0))
+                    if self.att_cls:
+                        attribute_logits = output['att_logits']
+                        attribute_cls_loss = self.att_cls_criterion(attribute_logits, attribute_labels)
+                        loss = loss + self.att_cls_w * attribute_cls_loss
+                        attribute_cls_losses.update(attribute_cls_loss.item(), images.size(0))
 
-            self.scaler.scale(loss).backward()
+                self.scaler.scale(loss).backward()
 
-            self.scaler.unscale_(self.optimizer)
-            if self.clip_option == 'norm':
-                grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_value)
-            elif self.clip_option == 'mynorm':
-                grad_norm = clip_grad_norm_(self.model.parameters(), self.clip_value)
-            elif self.clip_option == 'value':
-                torch.nn.utils.clip_grad_value_(self.model.parameters(), self.clip_value)
-                grad_norm = get_grad_norm(self.model.parameters())
-            else:
-                grad_norm = get_grad_norm(self.model.parameters())
+                self.scaler.unscale_(self.optimizer)
+                if self.clip_option == 'norm':
+                    grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_value)
+                elif self.clip_option == 'mynorm':
+                    grad_norm = clip_grad_norm_(self.model.parameters(), self.clip_value)
+                elif self.clip_option == 'value':
+                    torch.nn.utils.clip_grad_value_(self.model.parameters(), self.clip_value)
+                    grad_norm = get_grad_norm(self.model.parameters())
+                else:
+                    grad_norm = get_grad_norm(self.model.parameters())
 
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            self.lr_scheduler.step_update((epoch - 1) * num_steps + batch_idx)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.lr_scheduler.step_update((epoch - 1) * num_steps + batch_idx)
 
-            # self.lr_scheduler.step_update((epoch) * num_steps + batch_idx)
-            norm_meter.update(grad_norm)
-            memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
-            # cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
-            pbar.set_postfix(ce=f'{ce_losses.val:.4f} ({ce_losses.avg:.4f})\t',
-                             rg_cls=f'{region_cls_losses.val:.4f} ({region_cls_losses.avg:.4f})\t',
-                             att_cls=f'{attribute_cls_losses.val:.4f} ({attribute_cls_losses.avg:.4f})\t',
-                             mem=f'mem {memory_used:.0f}MB',
-                             norm=f'{norm_meter.val:.4f} ({norm_meter.avg:.4f})')
-            pbar.update()
+                # self.lr_scheduler.step_update((epoch) * num_steps + batch_idx)
+                norm_meter.update(grad_norm)
+                memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+                # cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
+                pbar.set_postfix(ce=f'{ce_losses.val:.4f} ({ce_losses.avg:.4f})\t',
+                                 rg_cls=f'{region_cls_losses.val:.4f} ({region_cls_losses.avg:.4f})\t',
+                                 att_cls=f'{attribute_cls_losses.val:.4f} ({attribute_cls_losses.avg:.4f})\t',
+                                 mem=f'mem {memory_used:.0f}MB',
+                                 norm=f'{norm_meter.val:.4f} ({norm_meter.avg:.4f})')
+                pbar.update()
             # if self.early_exit and batch_idx>100:
             #     torch.save(self.model.records, 'cam_records_fblrelu.pth')
             #     exit()
