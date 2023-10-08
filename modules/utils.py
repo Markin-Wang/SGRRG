@@ -447,7 +447,11 @@ def calculate_auc(preds, targets):
     if isinstance(preds,list):
         preds, targets = np.array(preds), np.array(targets)
     # filter all zero
-    mask = [i for i,target in enumerate(targets) if sum(target)!=0 ]
+    # mask = [i for i,target in enumerate(targets) if sum(target)!=0 ]
+    # preds, targets = preds[mask,:], targets[mask,:]
     # imbalanced dataset, use macro
-    preds, targets = preds[mask,:], targets[mask,:]
     return roc_auc_score(y_true=targets,y_score=preds,average='macro')
+
+def get_region_mask(region_labels):
+    region_sum = torch.sum(region_labels,dim=1)
+    return region_sum != 0

@@ -74,7 +74,6 @@ class BaseDatasetArrow(Dataset):
                 ann_file_path = os.path.join(root, 'annotations', f'mimic_cxr_{split}_dino.json')
             self.box_infos = self.load_box_annotations(ann_file_path)
 
-
             self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_1head.json')
             self.attributes = json.loads(open(self.attributes_path, 'r').read())
             self.attribute_anns, self.region_anns = self._parse_att_ann_info()
@@ -105,7 +104,8 @@ class BaseDatasetArrow(Dataset):
                 image_tensor, box_ann = self.transform['common_aug'](image, {"boxes": bboxes, "labels": box_ann['labels']})
                 image_tensor =  self.transform['norm_to_tensor'](image_tensor)
                 region_labels = self.get_region_label(image_id=iid)
-                box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
+                if self.split == 'train':
+                    box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
             if self.att_cls:
                 attribute_labels = self.get_attribute_label(image_id=iid)
 
@@ -125,7 +125,7 @@ class BaseDatasetArrow(Dataset):
             return_dict.update(box_ann)
             return_dict.update({'region_labels':region_labels})
 
-        if self.att_cls:
+        if self.att_cls and self.split=='train':
             return_dict.update({"attribute_labels": attribute_labels})
 
         return return_dict
@@ -134,15 +134,18 @@ class BaseDatasetArrow(Dataset):
         ann_ids = self.id2anns[image_id]
         ann_info = self.box_annotations[ann_ids]
         img_info = self.box_infos[image_id]
+        # print(11111,self._parse_box_ann_info(img_info, ann_info))
         return self._parse_box_ann_info(img_info, ann_info)
 
     def get_region_label(self,image_id):
         # some images without any regions mentioned, assign all zeros first,
         # 614 images in training filter set no attributes
-        return self.region_anns.get(image_id,torch.zeros(1, len(id2cat)))
+        # if image_id not in self.region_anns:
+        #     print(image_id)
+        return self.region_anns.get(image_id,torch.zeros(1,len(id2cat)))
 
     def get_box_mask(self,box_labels,region_labels):
-        box_masks = (region_labels[0,box_labels] == 1).float()
+        box_masks = region_labels[0,box_labels] == 1
         return box_masks
 
 
@@ -237,8 +240,8 @@ class BaseDatasetArrow(Dataset):
 
             x1, y1, w, h = ann['bbox']
             x1, y1, w, h = x1 / self.dsr, y1 / self.dsr, w / self.dsr, h / self.dsr
-            inter_w = max(0, min(x1 + w, img_info['width']) - max(x1, 0))
-            inter_h = max(0, min(y1 + h, img_info['height']) - max(y1, 0))
+            inter_w = max(0, min(x1 + w, img_width) - max(x1, 0))
+            inter_h = max(0, min(y1 + h, img_height) - max(y1, 0))
             if inter_w * inter_h == 0:
                 continue
             if ann['area'] <= 0 or w < 1 or h < 1:
@@ -278,6 +281,7 @@ class BaseDatasetArrow(Dataset):
             gt_bboxes_ignore = np.zeros((0, 4), dtype=np.float32)
 
         seg_map = img_info['filename'].replace('jpg', 'png')
+
 
         ann = dict(
             bboxes=gt_bboxes,

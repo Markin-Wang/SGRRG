@@ -1,7 +1,7 @@
 import torch.nn as nn
-from torchvision.ops.roi_pool import RoIPool
-from config import id2cat
 from modules.utils import init_weights
+import torch
+
 
 class RegionSelector(nn.Module):
     def __init__(self, config):
@@ -9,7 +9,20 @@ class RegionSelector(nn.Module):
 
         self.region_head = nn.Linear(config['d_vf'], config['num_classes'])
         self.region_head.apply(init_weights)
+        self.region_select_threshold = config['region_select_threshold']
 
-    def forward(self,x):
-        return self.region_head(x)
+    def forward(self,x,boxes=None,box_labels=None,box_masks=None):
+        logits = self.region_head(x)
+
+        if box_masks is not None:
+            return logits
+
+        # generate box_masks for val/test
+        region_probs = torch.sigmoid(logits)
+        region_selected = region_probs > self.region_select_threshold
+        region_selected = region_selected.view(-1)
+        num_box_categories = len(region_probs[0])
+        box_labels_ = box_labels + boxes[:,0] * num_box_categories
+        box_masks = region_selected[box_labels_.to(torch.long)]
+        return logits,region_probs,box_masks
 

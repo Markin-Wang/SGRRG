@@ -135,6 +135,8 @@ def config():
     record_dir = 'records/'
 
     # attribute classification setting
+    att_cls = False  # attribute classification
+    att_cls_w = 0.5
     feature_size = image_size // 32 # 32 is the downsampling rate for the visual extractor
     output_size = 2
     num_classes = 29 # the number of anatomical locations
@@ -142,6 +144,7 @@ def config():
     region_cls_only = False # perform region classification in visual extractor
     region_cls = False
     num_attributes = 884 # for one head attribute classification
+    use_box_feats = False
 
     save_period = 1
     monitor_mode = 'max'
@@ -173,7 +176,6 @@ def config():
     # For CAMANet
     cls = False
     addcls = False
-    att_cls = False  # attribute classification
     randaug = False
     resume = False
     fbl = False

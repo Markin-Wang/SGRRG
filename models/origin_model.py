@@ -15,6 +15,7 @@ from modules.utils import init_weights
 from .attribute_predictor import AttributePredictor
 from .region_selector import RegionSelector
 
+
 class RRGModel(nn.Module):
     def __init__(self, tokenizer, logger=None, config=None):
         super(RRGModel, self).__init__()
@@ -23,12 +24,11 @@ class RRGModel(nn.Module):
         self.vis = config['vis']
         self.tokenizer = tokenizer
         self.visual_extractor = VisualExtractor(logger, config)
-        self.region_select_threshold = config['region_select_threshold']
-
         self.sub_back = config['sub_back']
         self.records = []
         self.att_cls = config['att_cls']
         self.region_cls = config['region_cls']
+        self.use_box_feats = config['use_box_feats']
         # if config['ed_name'] == 'r2gen':
         #     self.encoder_decoder = r2gen(config, tokenizer)
         # elif config['ed_name'] == 'st_trans':
@@ -43,7 +43,8 @@ class RRGModel(nn.Module):
             self.attribute_predictor = AttributePredictor(config)
 
         # self.scene_graph_encoder =
-       # if self.att_cls:
+
+    # if self.att_cls:
 
     def __str__(self):
         model_parameters = filter(lambda p: p.requires_grad, self.parameters())
@@ -52,10 +53,9 @@ class RRGModel(nn.Module):
 
     def get_img_feats(self, images, seq):
         patch_feats, gbl_feats = self.get_img_feats(images)
-        return self.encode_img_feats(patch_feats,seq)
+        return self.encode_img_feats(patch_feats, seq)
 
-
-    def extract_img_feats(self,images):
+    def extract_img_feats(self, images):
         if self.addcls:
             patch_feats, gbl_feats, logits = self.visual_extractor(images)
             # if self.fbl and labels is not None:
@@ -63,38 +63,54 @@ class RRGModel(nn.Module):
             patch_feats, gbl_feats = self.visual_extractor(images)
         return patch_feats, gbl_feats
 
-
-    def encode_img_feats(self,patch_feats,seq):
+    def encode_img_feats(self, patch_feats, seq):
         patch_feats, seq, att_masks, seq_mask = self.encoder_decoder._prepare_feature_forward(patch_feats, None, seq)
         patch_feats = self.encoder_decoder.model.encode(patch_feats, att_masks)
         return patch_feats, seq, att_masks, seq_mask
 
-
-    def forward(self, images, targets=None, boxes=None, box_labels=None, return_feats=False,mode='sample'):
-        region_logits, region_probs = None, None
+    def forward(self, images, targets=None, boxes=None, box_labels=None, box_masks=None, return_feats=False,
+                mode='sample'):
+        region_logits, region_probs, att_logits, att_probs = None, None, None, None
+        return_dicts = {}
 
         patch_feats, gbl_feats = self.extract_img_feats(images)
         if self.region_cls:
-            region_logits = self.region_selector(gbl_feats)
             if mode != 'train' or return_feats:
+                region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, box_masks)
                 region_probs = torch.sigmoid(region_logits)
+            else:
+                # box_masks is used to judge whether in val/test
+                region_logits = self.region_selector(gbl_feats, boxes, box_labels, box_masks)
+
 
         if self.att_cls:
-            if mode != 'train' or return_feats:
-                box_feats, attribute_ids = self.attribute_predictor(patch_feats,boxes,box_labels,region_probs=region_probs)
+            if self.use_box_feats:
+                patch_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
             else:
-                box_feats, attribute_ids = self.attribute_predictor(patch_feats, boxes, box_labels)
+                att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
+            if mode != 'train' or return_feats:
+                att_probs = torch.sigmoid(att_logits)
 
         encoded_img_feats, seq, att_masks, seq_mask = self.encode_img_feats(patch_feats, targets)
 
         if mode == 'train':
             output, align_attns = self.encoder_decoder(encoded_img_feats, seq, att_masks, seq_mask)
-            if return_feats: return output, region_logits, region_probs, encoded_img_feats
-            return output, region_logits
+
+            return_dicts.update({'rrg_preds': output,
+                                 'region_probs': region_probs,
+                                 'region_logits': region_logits,
+                                 'att_logits': att_logits,
+                                 'att_probs': att_probs,
+                                 })
+            if return_feats:
+                return_dicts.update({'encoded_img_feats': encoded_img_feats})
         elif mode == 'sample':
-            return encoded_img_feats, region_probs
-        else:
-            raise ValueError
+            return_dicts.update({'encoded_img_feats': encoded_img_feats,
+                                 'region_logits': region_logits,
+                                 'region_probs': region_probs,
+                                 'att_probs': att_probs,
+                                 })
+        return return_dicts
 
     def core(self, it,
              patch_feats,
@@ -106,7 +122,7 @@ class RRGModel(nn.Module):
         else:
             ys = torch.cat([state[0][0], it.unsqueeze(1)], dim=1)
         seq_mask = subsequent_mask(ys.size(1), type=patch_feats.dtype).to(
-                                                           patch_feats.device)
+            patch_feats.device)
         out, attns = self.encoder_decoder.model.decode(patch_feats, mask, ys, seq_mask)
         out = self.encoder_decoder.logit(out)
         # text_embeds = self.forward_text_feats(ys, img_feats)

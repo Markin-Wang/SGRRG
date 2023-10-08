@@ -147,13 +147,11 @@ def main(_config):
 
 def scale_lr(config):
     # linear scale the learning rate according to total batch size, may not be optimal
-    linear_scaled_imglr = config['lr_ve'] * config['batch_size'] * dist.get_world_size() / 64.0
-    linear_scaled_textlr = config['lr_ed'] * config['batch_size'] * dist.get_world_size() / 64.0
+    linear_scaled_base = config['lr_base'] * config['batch_size'] * dist.get_world_size() / 64.0
     # linear_scaled_crosslr = config['cross_base_lr'] * config['per_gpu_batchsize'] * dist.get_world_size() / 64.0
-    linear_scaled_warmup_lr = linear_scaled_imglr / config['warmup_ratio']
+    linear_scaled_warmup_lr = linear_scaled_base / config['warmup_ratio']
     linear_scaled_min_lr = linear_scaled_warmup_lr
     # gradient accumulation also need to scale the learning rate
-    config['lr_ve'] = linear_scaled_imglr
-    config['lr_ed'] = linear_scaled_imglr
+    config['lr_base'] = linear_scaled_base
     config['warmup_lr'] = linear_scaled_warmup_lr
-    config['min_lr'] = linear_scaled_warmup_lr
+    config['min_lr'] = linear_scaled_min_lr
