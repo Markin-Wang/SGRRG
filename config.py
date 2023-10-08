@@ -64,7 +64,7 @@ def config():
     label_path = 'labels/labels.json'
     pretrained = ''
     model_path = ''
-    output = 'output'  # output dir
+    output = 'results'  # output dir
     eval = False  # whether to perform evaluation only
     img_backbone = 'resnet101'
 
@@ -131,7 +131,7 @@ def config():
     n_gpu = 1
     epochs = 100
     use_amp = True
-    save_dir = 'results/iu_xray'
+    save_dir = 'results'
     record_dir = 'records/'
 
     # attribute classification setting
