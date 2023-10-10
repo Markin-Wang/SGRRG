@@ -48,6 +48,4 @@ class AttributePredictor(nn.Module):
         x = torch.flatten(x,1)
         x= self.relu(self.bn(x))
         logits = self.attribuite_head(x)
-        if self.use_box_feats:
-            return x, logits
-        return logits
+        return x, logits

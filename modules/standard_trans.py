@@ -345,13 +345,13 @@ class EncoderDecoder(nn.Module):
 
     def _prepare_feature(self, att_feats, att_masks):
 
-        att_feats, seq, att_masks, seq_mask = self._prepare_feature_forward(att_feats, att_masks)
+        att_feats, seq, att_masks, seq_mask = self.prepare_feature_forward(att_feats, att_masks)
         memory = self.model.encode(att_feats, att_masks)
 
         # return fc_feats[..., :1], att_feats[..., :1], memory, att_masks
         return att_feats[..., :1], memory, att_masks, seq_mask
 
-    def _prepare_feature_forward(self, att_feats, att_masks=None, seq=None):
+    def prepare_feature_forward(self, att_feats, att_masks=None, seq=None):
         att_feats = self.att_embed(att_feats) # map the visual feature to encoding space
 
         if att_masks is None:

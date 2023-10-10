@@ -229,9 +229,10 @@ class R2DataLoader(DataLoader):
             selected_box_labels = batch_dict['box_labels'][batch_dict['box_masks'] == 1]
             selected_boxes_bsid = batch_dict['boxes'][batch_dict['box_masks'] == 1, 0]
             attribute_masks = []
+            attribute_ids = []
+            max_att = -1
             for i,attribute_label in enumerate(batch_dict['attribute_labels']):
                 i_box_labels = selected_box_labels[selected_boxes_bsid==i]
-                attribute_mask = np.ones
                 if len(attribute_label) == 0:
                     attribute_masks.append(torch.ones(i_box_labels.size(0)))
                     continue
@@ -239,11 +240,17 @@ class R2DataLoader(DataLoader):
                     attribute_masks.append(torch.zeros(i_box_labels.size(0)))
                 for box_label in i_box_labels:
                     temp_label = attribute_label[box_label.item()]
+                    attribute_ids.append(temp_label)
+                    max_att = max(max_att,len(temp_label))
                     attribute_label_ = torch.zeros(1,884) # 884 attributes
                     attribute_label_[0,temp_label] = 1.0
                     attribute_labels.append(attribute_label_)
             if attribute_labels:
                 batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=0)
+                attribute_ids_ = torch.full((len(attribute_labels),max_att), -100)
+                for i,att_id in enumerate(attribute_ids):
+                    attribute_ids_[i,:len(att_id)] = att_id
+                batch_dict['attribute_ids'] = attribute_ids_
             else:
                 batch_dict['attribute_labels'] = []
             batch_dict['attribute_masks'] = torch.cat(attribute_masks,dim=0)

@@ -90,6 +90,9 @@ def main(_config):
     # build model architecture
     model = RRGModel(tokenizer, logger, _config)
 
+    if _config['use_syn_bn']:
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+
     optimizer = build_optimizer(model, _config)
 
     logger.info(model)

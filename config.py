@@ -1,38 +1,7 @@
 from sacred import Experiment
+import numpy as np
 
 ex = Experiment("FIBER")
-
-# for mimic-cxr attribute classification
-id2cat  = [('left lung', 68),
- ('right lung', 68),
- ('cardiac silhouette', 34),
- ('mediastinum', 40),
- ('left lower lung zone', 57),
- ('right lower lung zone', 58),
- ('right hilar structures', 48),
- ('left hilar structures', 49),
- ('upper mediastinum', 30),
- ('left costophrenic angle', 34),
- ('right costophrenic angle', 34),
- ('left mid lung zone', 48),
- ('right mid lung zone', 48),
- ('aortic arch', 12),
- ('right upper lung zone', 49),
- ('left upper lung zone', 45),
- ('right hemidiaphragm', 14),
- ('right clavicle', 16),
- ('left clavicle', 15),
- ('left hemidiaphragm', 13),
- ('right apical zone', 24),
- ('trachea', 10),
- ('left apical zone', 23),
- ('carina', 5),
- ('svc', 9),
- ('right atrium', 7),
- ('cavoatrial junction', 4),
- ('abdomen', 9),
- ('spine', 13)]
-
 
 def _loss_names(d):
     ret = {
@@ -74,6 +43,8 @@ def config():
     num_workers = 8
 
     # Model
+    use_syn_bn = False
+    replace_bn = False
     ve_name = 'swin_s'
     ed_name = 'st_trans'
     visual_extractor_pretrained = True  # whether to load the pretrained visual extractor
@@ -141,11 +112,20 @@ def config():
     output_size = 2
     num_classes = 29 # the number of anatomical locations
     region_select_threshold = 0.5 # the threshold used to select the region after sigmoid
+    att_select_threshold = 0.5
+    att_pad_idx = -100
     region_cls_only = False # perform region classification in visual extractor
     region_cls = False
     num_attributes = 884 # for one head attribute classification
     use_box_feats = False
 
+    use_sg = False
+
+    # scene graph setting
+    num_layers_sgen = 3
+
+
+    #
     save_period = 1
     monitor_mode = 'max'
     early_stop = 10
@@ -228,3 +208,68 @@ def task_train_caption_mimic():
     ed_name = 'st_trans'
     seed = 9223
     use_amp = True
+
+
+# for mimic-cxr attribute classification
+id2cat  = [('left lung', 68),
+ ('right lung', 68),
+ ('cardiac silhouette', 34),
+ ('mediastinum', 40),
+ ('left lower lung zone', 57),
+ ('right lower lung zone', 58),
+ ('right hilar structures', 48),
+ ('left hilar structures', 49),
+ ('upper mediastinum', 30),
+ ('left costophrenic angle', 34),
+ ('right costophrenic angle', 34),
+ ('left mid lung zone', 48),
+ ('right mid lung zone', 48),
+ ('aortic arch', 12),
+ ('right upper lung zone', 49),
+ ('left upper lung zone', 45),
+ ('right hemidiaphragm', 14),
+ ('right clavicle', 16),
+ ('left clavicle', 15),
+ ('left hemidiaphragm', 13),
+ ('right apical zone', 24),
+ ('trachea', 10),
+ ('left apical zone', 23),
+ ('carina', 5),
+ ('svc', 9),
+ ('right atrium', 7),
+ ('cavoatrial junction', 4),
+ ('abdomen', 9),
+ ('spine', 13)]
+
+# generated from attribute annotation
+catid2attrange =np.array(
+[[102, 169],
+       [  0,  67],
+       [274, 307],
+       [204, 243],
+       [500, 556],
+       [660, 717],
+       [332, 379],
+       [403, 451],
+       [244, 273],
+       [170, 203],
+       [ 68, 101],
+       [452, 499],
+       [612, 659],
+       [734, 745],
+       [776, 824],
+       [839, 883],
+       [576, 589],
+       [718, 733],
+       [557, 571],
+       [756, 768],
+       [308, 331],
+       [746, 755],
+       [380, 402],
+       [825, 829],
+       [830, 838],
+       [769, 775],
+       [572, 575],
+       [590, 598],
+       [599, 611]]
+)

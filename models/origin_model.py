@@ -14,6 +14,7 @@ from modules.standard_trans import subsequent_mask
 from modules.utils import init_weights
 from .attribute_predictor import AttributePredictor
 from .region_selector import RegionSelector
+from .scene_graph_encoder import SceneGraphEncoder
 
 
 class RRGModel(nn.Module):
@@ -29,6 +30,8 @@ class RRGModel(nn.Module):
         self.att_cls = config['att_cls']
         self.region_cls = config['region_cls']
         self.use_box_feats = config['use_box_feats']
+        self.use_sg = config['use_sg']
+
         # if config['ed_name'] == 'r2gen':
         #     self.encoder_decoder = r2gen(config, tokenizer)
         # elif config['ed_name'] == 'st_trans':
@@ -42,7 +45,9 @@ class RRGModel(nn.Module):
             assert self.region_cls, "To perform attribute classification, region classification should be enabled."
             self.attribute_predictor = AttributePredictor(config)
 
-        # self.scene_graph_encoder =
+        if self.use_sg:
+            assert self.att_cls and self.region_cls, 'region cls and attribute cls should be enabled.'
+            self.scene_graph_encoder = SceneGraphEncoder(config)
 
     # if self.att_cls:
 
@@ -64,12 +69,12 @@ class RRGModel(nn.Module):
         return patch_feats, gbl_feats
 
     def encode_img_feats(self, patch_feats, seq):
-        patch_feats, seq, att_masks, seq_mask = self.encoder_decoder._prepare_feature_forward(patch_feats, None, seq)
+        patch_feats, seq, att_masks, seq_mask = self.encoder_decoder.prepare_feature_forward(patch_feats, None, seq)
         patch_feats = self.encoder_decoder.model.encode(patch_feats, att_masks)
         return patch_feats, seq, att_masks, seq_mask
 
-    def forward(self, images, targets=None, boxes=None, box_labels=None, box_masks=None, return_feats=False,
-                mode='sample'):
+    def forward(self, images, targets=None, boxes=None, box_labels=None, box_masks=None, att_labels=None,
+                return_feats=False,mode='sample'):
         region_logits, region_probs, att_logits, att_probs = None, None, None, None
         return_dicts = {}
 
@@ -84,12 +89,17 @@ class RRGModel(nn.Module):
 
 
         if self.att_cls:
+            box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
             if self.use_box_feats:
-                patch_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
-            else:
-                att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
+                patch_feats = box_feats
             if mode != 'train' or return_feats:
                 att_probs = torch.sigmoid(att_logits)
+
+        if self.use_sg:
+
+            output = self.scene_graph_encoder(boxes[box_masks],box_feats,att_labels,att_probs)
+
+
 
         encoded_img_feats, seq, att_masks, seq_mask = self.encode_img_feats(patch_feats, targets)
 
