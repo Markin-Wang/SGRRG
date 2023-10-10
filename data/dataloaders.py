@@ -249,7 +249,7 @@ class R2DataLoader(DataLoader):
                 batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=0)
                 attribute_ids_ = torch.full((len(attribute_labels),max_att), -100)
                 for i,att_id in enumerate(attribute_ids):
-                    attribute_ids_[i,:len(att_id)] = att_id
+                    attribute_ids_[i,:len(att_id)] = torch.LongTensor(att_id)
                 batch_dict['attribute_ids'] = attribute_ids_
             else:
                 batch_dict['attribute_labels'] = []

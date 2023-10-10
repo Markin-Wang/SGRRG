@@ -43,8 +43,8 @@ def config():
     num_workers = 8
 
     # Model
-    use_syn_bn = False
-    replace_bn = False
+    use_dropout = True
+    use_ln = False
     ve_name = 'swin_s'
     ed_name = 'st_trans'
     visual_extractor_pretrained = True  # whether to load the pretrained visual extractor
@@ -73,6 +73,7 @@ def config():
     suppress_UNK = 0
 
     # learning schedule
+    scale_lr = False
     warmup_ratio = 10
     warmup_epochs = 5
     output_logsoftmax = 1

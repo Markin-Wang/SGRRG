@@ -18,12 +18,12 @@ from .utils import load_embedding_layer
 
 WORD_EMBED_SIZE = 200
 
+
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 
-
-def subsequent_mask(size,type):
+def subsequent_mask(size, type):
     mask = torch.full((size, size), torch.finfo(type).min)
     mask_cond = torch.arange(mask.size(-1))
     mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
@@ -51,7 +51,7 @@ class Transformer(nn.Module):
         return self.vis_encoder(self.src_embed(src), src_mask)
 
     def decode(self, hidden_states, src_mask, tgt, tgt_mask):
-        target_emb = self.text_encoder(tgt,tgt_mask)
+        target_emb = self.text_encoder(tgt, tgt_mask)
         return self.decoder(target_emb, hidden_states, src_mask, tgt_mask)
 
 
@@ -68,6 +68,7 @@ class Encoder(nn.Module):
         for layer in self.layers:
             x = layer(x, mask)
         return self.norm(x)
+
 
 class TextEncoder(nn.Module):
     def __init__(self, embed, layer, N=1, encode=False):
@@ -109,6 +110,7 @@ class SublayerConnection(nn.Module):
     def forward(self, x, sublayer):
         return x + self.dropout(sublayer(self.norm(x)))
 
+
 class Decoder(nn.Module):
     def __init__(self, layer, N):
         super(Decoder, self).__init__()
@@ -137,6 +139,7 @@ class DecoderLayer(nn.Module):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
         x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, src_mask))
         return self.sublayer[2](x, self.feed_forward), self.src_attn.attn
+
 
 class MultiHeadedAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1, use_rpe=False, height=7, width=7):
@@ -176,7 +179,7 @@ class MultiHeadedAttention(nn.Module):
             [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
              for l, x in zip(self.linears, (query, key, value))]
 
-        #x, self.attn = attention(query, key, value, mask=mask, dropout=self.dropout)
+        # x, self.attn = attention(query, key, value, mask=mask, dropout=self.dropout)
         d_k = query.size(-1)
         # with autocast(enabled=False):
         #     scores = (torch.matmul(query.float(), key.float().transpose(-2, -1)) / math.sqrt(d_k))
@@ -227,22 +230,6 @@ class Embeddings(nn.Module):
     def forward(self, x):
         return self.lut(x) * math.sqrt(self.d_model)
 
-class BWEmbeddings(nn.Module):
-    def __init__(self, d_model, dropout, data_dir):
-        super(BWEmbeddings, self).__init__()
-        self.position_embed = PositionalEncoding(WORD_EMBED_SIZE, dropout)
-        self.embed_layer = load_embedding_layer(data_dir)
-        self.linear_layer = nn.Linear(WORD_EMBED_SIZE, d_model)
-        self.dropout = nn.Dropout(p=0.5)
-        self.relu = nn.ReLU(in_place=True)
-        trunc_normal_(self.linear_layer, std=.02)
-
-    def forward(self, x):
-        x = self.embed_layer(x)
-        print(1111, x.shape)
-        x = self.position_embed(x)
-        return self.relu(self.dropout(self.linear_layer(x)))
-
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout, max_len=5000):
@@ -261,6 +248,7 @@ class PositionalEncoding(nn.Module):
         x = x + self.pe[:, :x.size(1)]
         return self.dropout(x)
 
+
 class EncoderDecoder(nn.Module):
 
     def make_model(self, tgt_vocab):
@@ -271,13 +259,13 @@ class EncoderDecoder(nn.Module):
         #                                    padding_q=self.padding_q)
         # else:
         vis_attn_encode = MultiHeadedAttention(self.num_heads, self.d_model, use_rpe=self.pe == 'rpe')
-        #text_attn_encode = MultiHeadedAttention(self.num_heads, self.d_model)
+        # text_attn_encode = MultiHeadedAttention(self.num_heads, self.d_model)
         attn_decode = MultiHeadedAttention(self.num_heads, self.d_model)
         ff = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
 
         position = PositionalEncoding(self.d_model, self.dropout)
         if self.pe == 'ape':
-            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, self.d_model ))
+            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, self.num_patches, self.d_model))
             trunc_normal_(self.absolute_pos_embed, std=.02)
         else:
             self.absolute_pos_embed = None
@@ -285,16 +273,16 @@ class EncoderDecoder(nn.Module):
         # if self.bwinit:
         #     embed_layer = BWEmbeddings(self.d_model,self.dropout,self.data_dir)
         # else:
-        embed_layer = nn.Sequential(Embeddings(self.d_model, tgt_vocab),c(position))
-
-
+        embed_layer = nn.Sequential(Embeddings(self.d_model, tgt_vocab), c(position))
 
         model = Transformer(
-            Encoder(EncoderLayer(self.d_model, c(vis_attn_encode), c(ff), self.dropout), self.num_layers_en, ape=self.absolute_pos_embed),
+            Encoder(EncoderLayer(self.d_model, c(vis_attn_encode), c(ff), self.dropout), self.num_layers_en,
+                    ape=self.absolute_pos_embed),
             TextEncoder(
-                #embed=nn.Sequential(Embeddings(self.d_model, tgt_vocab),c(position)),
+                # embed=nn.Sequential(Embeddings(self.d_model, tgt_vocab),c(position)),
                 embed=embed_layer,
-                layer=EncoderLayer(self.d_model, c(attn_decode), c(ff), self.dropout), N=self.num_layers_ten, encode=self.encode_text),
+                layer=EncoderLayer(self.d_model, c(attn_decode), c(ff), self.dropout), N=self.num_layers_ten,
+                encode=self.encode_text),
             Decoder(
                 DecoderLayer(self.d_model, c(attn_decode), c(attn_decode), c(ff), self.dropout),
                 self.num_layers_de),
@@ -328,20 +316,20 @@ class EncoderDecoder(nn.Module):
         self.logit = nn.Linear(self.d_model, config['vocab_size'])
         self.att_feat_size = config['d_vf']
         self.att_hid_size = config['d_model']
-        self.use_bn = config['use_bn']
+        self.use_ln = config['use_ln']
         self.input_encoding_size = config['d_model']
         self.drop_prob_lm = config['drop_prob_lm']
+        self.use_dropout = config['use_dropout']
         # self.cls_logit = nn.Linear(args.d_model, 14)
-        self.att_embed = nn.Sequential(*(
-                ((nn.BatchNorm1d(self.att_feat_size),) if self.use_bn else ()) +
-                (nn.Linear(self.att_feat_size, self.input_encoding_size),
-                 nn.ReLU(),
-                 nn.Dropout(self.drop_prob_lm)) +
-                ((nn.BatchNorm1d(self.input_encoding_size),) if self.use_bn == 2 else ())))
+        self.att_embed = nn.Sequential(
+            nn.Linear(self.att_feat_size, self.input_encoding_size),
+            nn.ReLU(inplace=True),
+            *([nn.Dropout(self.drop_prob_lm)] if self.use_dropout else []),
+            *([nn.LayerNorm(self.input_encoding_size)] if self.use_ln else [])
+        )
 
     def init_hidden(self, bsz):
         return []
-
 
     def _prepare_feature(self, att_feats, att_masks):
 
@@ -352,7 +340,7 @@ class EncoderDecoder(nn.Module):
         return att_feats[..., :1], memory, att_masks, seq_mask
 
     def prepare_feature_forward(self, att_feats, att_masks=None, seq=None):
-        att_feats = self.att_embed(att_feats) # map the visual feature to encoding space
+        att_feats = self.att_embed(att_feats)  # map the visual feature to encoding space
 
         if att_masks is None:
             att_masks = att_feats.new_zeros(att_feats.shape[:2], dtype=att_feats.dtype)
@@ -362,11 +350,12 @@ class EncoderDecoder(nn.Module):
             # crop the last one
             seq = seq[:, :-1]
             seq_mask = (seq.data > 0).float()
-            seq_mask[:, 0] += 1 # the first token is bos token with id 0
+            seq_mask[:, 0] += 1  # the first token is bos token with id 0
             seq_mask = seq_mask[:, None, :].expand(att_feats.size(0), seq.size(-1), seq.size(-1))
             seq_mask = 1.0 - seq_mask
             seq_mask = seq_mask.masked_fill(seq_mask.bool(), torch.finfo(att_feats.dtype).min)
-            sub_mask = subsequent_mask(seq.size(-1),type = att_feats.dtype).to(att_feats.device) # use add attention instead of filling
+            sub_mask = subsequent_mask(seq.size(-1), type=att_feats.dtype).to(
+                att_feats.device)  # use add attention instead of filling
             seq_mask = seq_mask + sub_mask
         else:
             seq_mask = None
@@ -387,6 +376,7 @@ class EncoderDecoder(nn.Module):
             ys = it.unsqueeze(1)
         else:
             ys = torch.cat([state[0][0], it.unsqueeze(1)], dim=1)
-        out, attns = self.model.decode(memory, mask, ys, subsequent_mask(ys.size(1),type=memory.dtype).to(memory.device))
+        out, attns = self.model.decode(memory, mask, ys,
+                                       subsequent_mask(ys.size(1), type=memory.dtype).to(memory.device))
         out = self.logit(out)
         return out[:, -1], [ys.unsqueeze(0)], attns

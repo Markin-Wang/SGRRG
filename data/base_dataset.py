@@ -240,6 +240,15 @@ class BaseDatasetArrow(Dataset):
 
             x1, y1, w, h = ann['bbox']
             x1, y1, w, h = x1 / self.dsr, y1 / self.dsr, w / self.dsr, h / self.dsr
+
+            # dsr_h = img_height / 224
+            # dsr_w = img_width / 224
+            # if (w/dsr_w) // 32 < 2 or (h/dsr_h) // 32 < 2:
+            #     self.count += 1
+            #     print(self.count,(w/dsr_w) // 32,(h/dsr_h) // 32)
+            # else:
+            #     print('okay')
+
             inter_w = max(0, min(x1 + w, img_width) - max(x1, 0))
             inter_h = max(0, min(y1 + h, img_height) - max(y1, 0))
             if inter_w * inter_h == 0:

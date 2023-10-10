@@ -12,18 +12,27 @@ class AttributePredictor(nn.Module):
         self.output_size = config['output_size']
         self.num_attributes = config['num_attributes']
         self.use_box_feats = config['use_box_feats']
+        self.drop_prob_lm = config['drop_prob_lm']
 
 
 
         self.roi_pool = RoIPool(output_size=[self.output_size, self.output_size],
                                 spatial_scale=self.img_resolution // self.feature_size)
-        self.conv = nn.Conv2d(in_channels=self.feature_size, out_channels=self.feature_size,
-                              kernel_size=self.output_size,
-                              stride=1,
-                              bias=False)
-        self.conv.apply(init_weights)
-        self.bn = nn.BatchNorm1d(config['d_vf'])
-        self.relu = nn.LeakyReLU()
+        # self.conv = nn.Conv2d(in_channels=self.feature_size, out_channels=self.feature_size,
+        #                       kernel_size=self.output_size,
+        #                       stride=1,
+        #                       bias=False)
+
+        # mention not use conv net as resolution in 224 two small, cause majority less than 2
+        # if larger resolution, okay
+
+        self.ff = nn.Sequential(
+            nn.Linear(self.feature_size, self.feature_size),
+            nn.GELU(),
+            nn.LayerNorm(self.feature_size),
+            nn.Dropout(p=self.drop_prob_lm)
+        )
+        self.ff.apply(init_weights)
 
         # attribute_heads = []
         # self.name2head = {}
@@ -34,7 +43,8 @@ class AttributePredictor(nn.Module):
         # for v in attribute_heads:
         #     v.apply(init_weights)
         # self.attribute_heads = nn.ModuleList(attribute_heads)
-        self.norm = nn.LayerNorm
+        # self.bn = nn.BatchNorm1d(self.feature_size)
+        # self.relu = nn.LeakyReLU(inplace=True)
         self.attribuite_head = nn.Linear(config['d_vf'], self.num_attributes)
 
     def forward(self, x, boxes, box_labels, box_masks=None):
@@ -44,8 +54,7 @@ class AttributePredictor(nn.Module):
         x = x.transpose(1, 2).reshape(bs, feat_size, int(num_tokens ** 0.5),
                                       int(num_tokens ** 0.5))  # transform to shape [BS,C,H,W]
         x = self.roi_pool(x, boxes)  # box feasts, N x C x output_size x output_size
-        x = self.conv(x) # [bs, C, H(1), W(1)]
         x = torch.flatten(x,1)
-        x= self.relu(self.bn(x))
+        x = self.ff(x) # [bs, C, H(1), W(1)]
         logits = self.attribuite_head(x)
         return x, logits

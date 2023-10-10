@@ -38,6 +38,18 @@ def setup(world_size):
     os.environ["RANK"] = "0"
     os.environ["WORLD_SIZE"] = world_size
 
+def scale_lr(config):
+    # linear scale the learning rate according to total batch size, may not be optimal
+    linear_scaled_base = config['lr_base'] * config['batch_size'] * dist.get_world_size() / 64.0
+
+    # linear_scaled_crosslr = config['cross_base_lr'] * config['per_gpu_batchsize'] * dist.get_world_size() / 64.0
+    linear_scaled_warmup_lr = linear_scaled_base / config['warmup_ratio']
+    linear_scaled_min_lr = linear_scaled_warmup_lr
+    # gradient accumulation also need to scale the learning rate
+    config['lr_base'] = linear_scaled_base
+    config['warmup_lr'] = linear_scaled_warmup_lr
+    config['min_lr'] = linear_scaled_min_lr
+
 
 @ex.automain
 def main(_config):
@@ -90,8 +102,8 @@ def main(_config):
     # build model architecture
     model = RRGModel(tokenizer, logger, _config)
 
-    if _config['use_syn_bn']:
-        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    if _config['scale_lr']:
+        scale_lr(_config)
 
     optimizer = build_optimizer(model, _config)
 
@@ -148,13 +160,4 @@ def main(_config):
     writer.close()
 
 
-def scale_lr(config):
-    # linear scale the learning rate according to total batch size, may not be optimal
-    linear_scaled_base = config['lr_base'] * config['batch_size'] * dist.get_world_size() / 64.0
-    # linear_scaled_crosslr = config['cross_base_lr'] * config['per_gpu_batchsize'] * dist.get_world_size() / 64.0
-    linear_scaled_warmup_lr = linear_scaled_base / config['warmup_ratio']
-    linear_scaled_min_lr = linear_scaled_warmup_lr
-    # gradient accumulation also need to scale the learning rate
-    config['lr_base'] = linear_scaled_base
-    config['warmup_lr'] = linear_scaled_warmup_lr
-    config['min_lr'] = linear_scaled_min_lr
+

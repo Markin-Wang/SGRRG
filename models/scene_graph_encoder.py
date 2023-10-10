@@ -1,8 +1,9 @@
 import torch.nn as nn
 import copy
-from modules.standard_trans import MultiHeadedAttention, PositionwiseFeedForward,SublayerConnection
+from modules.standard_trans import MultiHeadedAttention, PositionwiseFeedForward,SublayerConnection, Encoder
 from modules.utils import init_weights
 from config import catid2attrange
+import numpy as np
 
 class SceneGraphEncoder(nn.Module):
     def __init__(self,config):
@@ -13,6 +14,7 @@ class SceneGraphEncoder(nn.Module):
         self.hidden_size = config['d_model']
         self.num_layers_sgen = config['num_layers_sgen']
         self.num_classes = config['num_classes']
+        self.num_heads = config['num_heads']
 
         self.token_type_embeddings = nn.Embedding(self.num_classes+1,self.hidden_size)
         self.token_type_embeddings.apply(init_weights)
@@ -40,8 +42,8 @@ class SceneGraphEncoder(nn.Module):
         for i in range(self.attribute_mask.shape[0]):
             self.attribute_mask[i][self.catid2attrange[i]] = True
 
-        attention = MultiHeadedAttention(self.num_heads, self.d_model, use_rpe=None)
-        ff = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
+        attention = MultiHeadedAttention(self.num_heads, self.hidden_size, use_rpe=None)
+        ff = PositionwiseFeedForward(self.hidden_size, self.d_ff, self.dropout)
 
         self.sg_encoder = Encoder(EncoderLayer(self.hidden_size, attention, ff, self.dropout), self.num_layers_sgen,ape=None)
         self.sg_encoder.apply(init_weights)
