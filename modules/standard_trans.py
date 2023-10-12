@@ -36,13 +36,12 @@ def subsequent_mask(size, type):
 
 
 class Transformer(nn.Module):
-    def __init__(self, vis_encoder, text_encoder, decoder, src_embed, fbl=False):
+    def __init__(self, vis_encoder, text_encoder, decoder, src_embed):
         super(Transformer, self).__init__()
         self.vis_encoder = vis_encoder
         self.text_encoder = text_encoder
         self.decoder = decoder
         self.src_embed = src_embed
-        self.fbl = fbl
 
     def forward(self, src, tgt, src_mask, tgt_mask):
         return self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask)
@@ -219,7 +218,7 @@ class PositionwiseFeedForward(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        return self.w_2(self.dropout(F.relu(self.w_1(x))))
+        return self.w_2(self.dropout(F.gelu(self.w_1(x))))
 
 
 class Embeddings(nn.Module):
@@ -254,11 +253,7 @@ class EncoderDecoder(nn.Module):
 
     def make_model(self, tgt_vocab):
         c = copy.deepcopy
-        # if self.cvt_attn:
-        #     vis_attn_encode = CvTAttention(self.d_model,self.d_model,self.num_heads, kernel_size=self.kernel_size,
-        #                                    stride_kv=self.stride_kv, stride_q=self.stride_q,padding_kv=self.padding_kv,
-        #                                    padding_q=self.padding_q)
-        # else:
+
         vis_attn_encode = MultiHeadedAttention(self.num_heads, self.d_model, use_rpe=self.pe == 'rpe')
         # text_attn_encode = MultiHeadedAttention(self.num_heads, self.d_model)
         attn_decode = MultiHeadedAttention(self.num_heads, self.d_model)
@@ -287,8 +282,7 @@ class EncoderDecoder(nn.Module):
             Decoder(
                 DecoderLayer(self.d_model, c(attn_decode), c(attn_decode), c(ff), self.dropout),
                 self.num_layers_de),
-            lambda x: x,
-            fbl=self.fbl)
+            lambda x: x)
         for p in model.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
@@ -303,14 +297,11 @@ class EncoderDecoder(nn.Module):
         self.d_ff = config['d_ff']
         self.num_heads = config['num_heads']
         self.dropout = config['dropout']
-        self.fbl = config['fbl']
         self.encode_text = config['encode_text']
         self.num_layers_ten = config['num_layers_ten']
         self.data_dir = config['data_dir']
 
         self.num_patches = config['num_patches']
-        if self.fbl:
-            self.num_patches += 1
         self.pe = config['pe']
 
         self.model = self.make_model(config['vocab_size'])

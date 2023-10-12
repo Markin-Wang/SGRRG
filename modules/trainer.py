@@ -66,9 +66,6 @@ class BaseTrainer(object):
             self.att_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.att_cls_w = config['att_cls_w']
 
-        if config['attn_cam']:
-            self.mse_criterion = Weighted_MSELoss(weight=config['wmse'])
-            self.mse_w = config['msw_w']
         self.criterion = criterion
         self.metric_ftns = metric_ftns
 

@@ -18,7 +18,6 @@ import torchvision.transforms.v2 as transforms
 class R2DataLoader(DataLoader):
     def __init__(self, config, tokenizer, split, shuffle, vis=False):
         self.config = config
-        self.cls = config['cls']
         self.dataset_name = config['dataset_name']
         self.batch_size = config['batch_size']
         self.shuffle = shuffle
@@ -33,48 +32,22 @@ class R2DataLoader(DataLoader):
         g.manual_seed(config['seed'])
 
         if split == 'train':
-            if config['randaug']:
-                print('Random applied transformation is utilized for ' + split + ' dataset.')
-                self.transform = transforms.Compose([
-                    transforms.Resize(256),
-                    transforms.RandomCrop(224),
-                    transforms.RandomApply([
-                        transforms.RandomRotation(10, interpolation=transforms.InterpolationMode.BICUBIC),
-                        # transforms.RandomAffine(0, shear=10, interpolation=transforms.InterpolationMode.BICUBIC),
-                        transforms.RandomAffine(0, scale=(0.8, 1.2),
-                                                interpolation=transforms.InterpolationMode.BICUBIC)
-                    ]),
-                    # transforms.RandomHorizontalFlip(),
-                    # transforms.RandomPerspective(distortion_scale=0.2),
-                    # transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0),
-                    transforms.ToTensor(),
-                    # transforms.RandomErasing(scale=(0.02, 0.16), ratio=(0.3, 1.6)),
+            self.transform = {'common_aug': transforms.Compose([
+                transforms.Resize((config['image_size'], config['image_size'])),
+                transforms.RandomRotation(config['rotate_degree']),
+                # transforms.RandomCrop(224),
+                # transforms.ToImageTensor(),  # note this does not scale the image
+                # transforms.ConvertImageDtype(torch.float32),
+                # transforms.Normalize((123.675, 116.28, 103.53),
+                #                      (58.395, 57.12, 57.375))
+            ]),
+                'norm_to_tensor': transforms.Compose([
+                    transforms.ToImageTensor(),  # note this does not scale the image
+                    transforms.ConvertImageDtype(torch.float32), # this operation scale the value from 255 to [0,1]
                     transforms.Normalize((0.485, 0.456, 0.406),
-                                         (0.229, 0.224, 0.225))])
-            else:
-                # if self.att_cls:
-                #     self.transform = [
-                #         Resize(scale=(config['image_size'], config['image_size'])),
-                #         Normalize(),
-                #         ImageToTensor(),
-                #     ]
-                # else:
-                self.transform = {'common_aug': transforms.Compose([
-                    transforms.Resize((config['image_size'], config['image_size'])),
-                    transforms.RandomRotation(config['rotate_degree']),
-                    # transforms.RandomCrop(224),
-                    # transforms.ToImageTensor(),  # note this does not scale the image
-                    # transforms.ConvertImageDtype(torch.float32),
-                    # transforms.Normalize((123.675, 116.28, 103.53),
-                    #                      (58.395, 57.12, 57.375))
+                                         (0.229, 0.224, 0.225))
                 ]),
-                    'norm_to_tensor': transforms.Compose([
-                        transforms.ToImageTensor(),  # note this does not scale the image
-                        transforms.ConvertImageDtype(torch.float32), # this operation scale the value from 255 to [0,1]
-                        transforms.Normalize((0.485, 0.456, 0.406),
-                                             (0.229, 0.224, 0.225))
-                    ]),
-                }
+            }
         else:
             self.transform = {'common_aug': transforms.Compose([
                 transforms.Resize((config['image_size'], config['image_size'])),
@@ -98,18 +71,15 @@ class R2DataLoader(DataLoader):
             #     ImageToTensor(),
             # ]
 
-        if self.dataset_name == 'iu_xray' and not self.cls:
+        if self.dataset_name == 'iu_xray':
             self.dataset = IuxrayMultiImageDatasetArrow(config=self.config, tokenizer=tokenizer, split=self.split,
                                                         transform=self.transform)
-        elif self.dataset_name == 'iu_xray' and self.cls:
-            self.dataset = IuxrayMultiImageClsDataset(self.config, tokenizer, self.split, transform=self.transform,
-                                                      vis=self.vis)
-        elif self.dataset_name.startswith('mimic') and not self.cls:
+        elif self.dataset_name.startswith('mimic'):
             self.dataset = MIMICMultiImageDatasetArrow(config=self.config, tokenizer=tokenizer, split=self.split,
                                                        transform=self.transform)
-        elif self.dataset_name.startswith('mimic') and self.cls:
-            self.dataset = MimiccxrSingleImageClsDataset(self.config, self.split, transform=self.transform,
-                                                         vis=self.vis)
+        else:
+            raise NotImplementedError
+
         num_tasks = dist.get_world_size()
         global_rank = dist.get_rank()
         self.sampler = torch.utils.data.DistributedSampler(

@@ -139,14 +139,7 @@ def config():
     block3 = False
     encode_text = False
     num_layers_ten = 0
-    cvt_attn = False
-    stride_kv = 1
-    stride_q = 1
-    padding_q = 1
-    padding_kv = 1
-    kernel_size = 3
-    conv_embed = False
-    bwinit = False
+
     cfg = 'configs/swin_tiny_patch4_window7_224.yaml'
     local_rank = 0
     load_path = ''
@@ -154,23 +147,9 @@ def config():
     # Evaluation
     monitor_metric = 'BLEU_4'
 
-    # For CAMANet
-    cls = False
-    addcls = False
-    randaug = False
     resume = False
-    fbl = False
-    sub_back = False
-    attn_cam = False
-    drop_fbl = False
-    attn_method = False
     early_exit = False  # used for test
-    region_cls_w = 0.5
-    wmse = 0.5
     layer_id = 2  # the layer id in encoder to select attention
-    topk = 0.1
-    fore_t = 0.6
-    back_t = 0.3
     pe = 'none'  # whether to use absolute position embedding in encoder
 
 

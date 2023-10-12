@@ -21,11 +21,9 @@ class RRGModel(nn.Module):
     def __init__(self, tokenizer, logger=None, config=None):
         super(RRGModel, self).__init__()
         self.config = config
-        self.addcls = config['addcls']
         self.vis = config['vis']
         self.tokenizer = tokenizer
         self.visual_extractor = VisualExtractor(logger, config)
-        self.sub_back = config['sub_back']
         self.records = []
         self.att_cls = config['att_cls']
         self.region_cls = config['region_cls']
@@ -61,11 +59,7 @@ class RRGModel(nn.Module):
         return self.encode_img_feats(patch_feats, seq)
 
     def extract_img_feats(self, images):
-        if self.addcls:
-            patch_feats, gbl_feats, logits = self.visual_extractor(images)
-            # if self.fbl and labels is not None:
-        else:
-            patch_feats, gbl_feats = self.visual_extractor(images)
+        patch_feats, gbl_feats = self.visual_extractor(images)
         return patch_feats, gbl_feats
 
     def encode_img_feats(self, patch_feats, seq):
