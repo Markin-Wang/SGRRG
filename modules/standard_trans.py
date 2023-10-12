@@ -14,9 +14,8 @@ from torch.cuda.amp import GradScaler, autocast, custom_fwd, custom_bwd
 from math import inf
 from timm.models.layers import trunc_normal_, to_2tuple
 from .core import CvTAttention
-from .utils import load_embedding_layer
+from .utils import load_embedding_layer, init_weights
 
-WORD_EMBED_SIZE = 200
 
 
 def clones(module, N):
@@ -68,6 +67,21 @@ class Encoder(nn.Module):
             x = layer(x, mask)
         return self.norm(x)
 
+class SceneGraphAidedEncoderLayer(nn.Module):
+    def __init__(self, d_model, self_attn, cross_attn, feed_forward, dropout):
+        super(DecoderLayer, self).__init__()
+        self.d_model = d_model
+        self.self_attn = self_attn
+        self.cross_attn = cross_attn
+        self.feed_forward = feed_forward
+        self.sublayer = clones(SublayerConnection(self.d_model, dropout), 3)
+
+    def forward(self, x, hidden_states, src_mask, tgt_mask):
+        m = hidden_states
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
+        x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, src_mask))
+        return self.sublayer[2](x, self.feed_forward), self.src_attn.attn
+
 
 class TextEncoder(nn.Module):
     def __init__(self, embed, layer, N=1, encode=False):
@@ -108,6 +122,8 @@ class SublayerConnection(nn.Module):
 
     def forward(self, x, sublayer):
         return x + self.dropout(sublayer(self.norm(x)))
+
+
 
 
 class Decoder(nn.Module):
@@ -300,12 +316,10 @@ class EncoderDecoder(nn.Module):
         self.encode_text = config['encode_text']
         self.num_layers_ten = config['num_layers_ten']
         self.data_dir = config['data_dir']
-
         self.num_patches = config['num_patches']
         self.pe = config['pe']
-
         self.model = self.make_model(config['vocab_size'])
-        self.logit = nn.Linear(self.d_model, config['vocab_size'])
+
         self.att_feat_size = config['d_vf']
         self.att_hid_size = config['d_model']
         self.use_ln = config['use_ln']
@@ -313,12 +327,16 @@ class EncoderDecoder(nn.Module):
         self.drop_prob_lm = config['drop_prob_lm']
         self.use_dropout = config['use_dropout']
         # self.cls_logit = nn.Linear(args.d_model, 14)
+
+
         self.att_embed = nn.Sequential(
             nn.Linear(self.att_feat_size, self.input_encoding_size),
             *([nn.LayerNorm(self.input_encoding_size)] if self.use_ln else []),
             nn.GELU(),
             *([nn.Dropout(p=self.drop_prob_lm)] if self.use_dropout else []),
         )
+
+        self.logit = nn.Linear(self.d_model, config['vocab_size'])
 
     def init_hidden(self, bsz):
         return []

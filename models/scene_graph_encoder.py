@@ -33,7 +33,7 @@ class SceneGraphEncoder(nn.Module):
 
         self.proj.apply(init_weights)
 
-        self.att_embedding = nn.Embedding(self.num_attributes + 1, self.hidden_size)  # the last one is for the mask
+        self.att_embedding = nn.Embedding(self.num_attributes + 1, self.hidden_size, padding_idx=self.num_attributes + 1)  # the last one is for the mask
 
         self.att_embedding.apply(init_weights)
 
@@ -43,9 +43,7 @@ class SceneGraphEncoder(nn.Module):
 
         self.att_norm = nn.LayerNorm(self.hidden_size)
 
-        self.attribute_mask = torch.full((self.num_classes, self.num_attributes), False)
-        for i in range(self.attribute_mask.shape[0]):
-            self.attribute_mask[i][self.catid2attrange[i][0]:self.catid2attrange[i][1] + 1] = True
+
 
         attention = MultiHeadedAttention(self.num_heads, self.hidden_size, use_rpe=None)
         ff = PositionwiseFeedForward(self.hidden_size, self.d_ff, self.drop_prob_lm)
@@ -53,6 +51,14 @@ class SceneGraphEncoder(nn.Module):
         self.sg_encoder = Encoder(EncoderLayer(self.hidden_size, attention, ff, self.drop_prob_lm),
                                   self.num_layers_sgen, ape=None)
         self.sg_encoder.apply(init_weights)
+
+        attribute_mask = torch.full((self.num_classes, self.num_attributes), False)
+        for i in range(self.attribute_mask.shape[0]):
+            attribute_mask[i][self.catid2attrange[i][0]:self.catid2attrange[i][1] + 1] = True
+
+        self.register_buffer(
+            "attribute_mask", attribute_mask, persistent=False
+        )
 
     def forward(self, boxes, box_feats, box_labels, att_ids=None, att_probs=None):
         if att_ids is None:

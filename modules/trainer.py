@@ -412,14 +412,14 @@ class Trainer(BaseTrainer):
                         #         attribute_labels = data['attribute_labels'].to(device, non_blocking=True)
 
                     with autocast(dtype=torch.float16):
-                        if split == 'val':
-                            output = self.model(batch_dict,mode='train', return_feats=True)
-                            rrg_preds = output['rrg_preds']
-                            loss = self.criterion(rrg_preds, batch_dict['text'], batch_dict['mask'])
-                            val_ce_losses.update(loss.item(),rrg_preds.size(0))
-                        # output, _ = self.model(images,reports_ids,mode='sample')
-                        else:
-                            output = self.model(batch_dict,mode='sample', return_feats=True)
+                        # if split == 'val':
+                        #     output = self.model(batch_dict,mode='train', return_feats=True)
+                        #     rrg_preds = output['rrg_preds']
+                        #     loss = self.criterion(rrg_preds, batch_dict['text'], batch_dict['mask'])
+                        #     val_ce_losses.update(loss.item(),rrg_preds.size(0))
+                        # # output, _ = self.model(images,reports_ids,mode='sample')
+                        # else:
+                        output = self.model(batch_dict,mode='sample')
 
                         patch_feats = output['encoded_img_feats']
                         if self.region_cls:
