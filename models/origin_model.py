@@ -81,9 +81,10 @@ class RRGModel(nn.Module):
 
         patch_feats, gbl_feats = self.extract_img_feats(images)
         if self.region_cls:
-            boxes, box_labels, box_masks = batch_dict['boxes'], batch_dict['box_labels'], batch_dict['box_masks']
+            boxes, box_labels = batch_dict['boxes'], batch_dict['box_labels']
+            box_masks = batch_dict.get('box_masks',None)
             if mode != 'train' or return_feats:
-                region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, box_masks)
+                region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels)
                 region_probs = torch.sigmoid(region_logits)
             else:
                 # box_masks is used to judge whether in val/test
@@ -97,7 +98,7 @@ class RRGModel(nn.Module):
                 att_probs = torch.sigmoid(att_logits)
 
         if self.use_sg:
-            attribute_ids = batch_dict['attribute_ids']
+            attribute_ids = batch_dict.get('attribute_ids',None)
             output = self.scene_graph_encoder(boxes[box_masks], box_feats, box_labels[box_masks], attribute_ids, att_probs)
 
         encoded_img_feats, seq, att_masks, seq_mask = self.encode_img_feats(patch_feats, targets)

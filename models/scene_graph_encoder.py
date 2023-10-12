@@ -32,15 +32,15 @@ class SceneGraphEncoder(nn.Module):
 
         self.proj.apply(init_weights)
 
-        self.att_embedding = nn.Embedding(self.num_attributes,self.hidden_size)
+        self.att_embedding = nn.Embedding(self.num_attributes+1,self.hidden_size) # the last one is for the mask
 
         self.att_embedding.apply(init_weights)
 
         self.catid2attrange = catid2attrange
 
-        self.attribute_mask = np.full((self.num_classes,self.num_attributes),False)
+        self.attribute_mask = torch.full((self.num_classes,self.num_attributes),False)
         for i in range(self.attribute_mask.shape[0]):
-            self.attribute_mask[i][self.catid2attrange[i]] = True
+            self.attribute_mask[i][self.catid2attrange[i][0]:self.catid2attrange[i][1]+1] = True
 
         attention = MultiHeadedAttention(self.num_heads, self.hidden_size, use_rpe=None)
         ff = PositionwiseFeedForward(self.hidden_size, self.d_ff, self.drop_prob_lm)
@@ -52,16 +52,18 @@ class SceneGraphEncoder(nn.Module):
     def forward(self,boxes,box_feats,box_labels,att_ids=None,att_probs=None):
         if att_ids is None:
             assert att_probs is not None
+            attribute_mask = self.attribute_mask.to(box_labels.device)
             att_labels = att_probs > self.att_select_threshold
-            att_masks = self.attribute_mask[box_labels]
+            att_masks = attribute_mask[box_labels]
             att_labels = att_labels & att_masks
             att_ids = self._prepare_att(att_labels)
 
         att_masks = torch.zeros((box_feats.shape[0], att_ids.shape[-1])).to(box_feats.device)
         att_masks[att_ids == self.att_pad_idx] = torch.finfo(box_feats.dtype).min
 
-        att_type = torch.full((att_ids.shape[0],1),self.num_classes,device=att_ids.device)
+        att_ids[att_ids==self.att_pad_idx] = self.num_attributes # change to the unused idx for attribute embedding
 
+        att_type = torch.full((att_ids.shape[0],1),self.num_classes,device=att_ids.device)
         att_embed = self.att_embedding(att_ids) + self.token_type_embeddings(att_type)
 
 
@@ -80,12 +82,12 @@ class SceneGraphEncoder(nn.Module):
         return sg_embed
 
     def _prepare_att(self,att_labels):
-        max_len = torch.sum(att_labels,dim=1)
+        max_len = max(torch.sum(att_labels,dim=1))
         bs = att_labels.shape[0]
-        att_ids = torch.full((bs, max_len), self.att_pad_idx)
+        att_ids = torch.full((bs, max_len), self.att_pad_idx,device=att_labels.device)
         for i in range(att_labels.shape[0]):
-            idx = torch.nonzeros(att_labels[i]).flatten()
-            att_ids[i,len(idx)] = idx
+            idx = torch.nonzero(att_labels[i]).flatten()
+            att_ids[i,:len(idx)] = idx
 
         return att_ids
 
