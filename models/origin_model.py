@@ -34,7 +34,6 @@ class RRGModel(nn.Module):
         self.hidden_size = config['d_model']
         self.d_ff = config['d_ff']
 
-        self.logit = nn.Linear(self.hidden_size, config['vocab_size'])
         self.att_feat_size = config['d_vf']
         self.use_ln = config['use_ln']
 
