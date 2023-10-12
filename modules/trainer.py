@@ -90,6 +90,10 @@ class BaseTrainer(object):
         self.checkpoint_dir = os.path.join(config['output'], config['dataset_name'], config['exp_name'])
         self.best_epoch = 0
 
+        # keys to cuda
+        self.keys = set(['image','text', 'mask', 'boxes', 'box_labels', 'box_masks', 'region_labels', 'attribute_labels',
+                         'attribute_ids'])
+
         if not os.path.exists(self.checkpoint_dir):
             os.makedirs(self.checkpoint_dir, exist_ok=True)
 
@@ -300,37 +304,37 @@ class Trainer(BaseTrainer):
         with tqdm(desc='Epoch %d - train' % epoch, disable=dist.get_rank() != self.local_rank,
                   unit='it', total=len(self.train_dataloader)) as pbar:
             for batch_idx, data in enumerate(self.train_dataloader):
-                images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
-                                                     data['text'].to(device, non_blocking=True), \
-                                                     data['mask'].to(device, non_blocking=True)
-                boxes, box_labels, region_labels, box_masks = None, None, None, None
-                if self.region_cls:
-                    boxes, box_labels, box_masks, region_labels = data['boxes'].to(device, non_blocking=True), \
-                                                                  data['box_labels'].to(device, non_blocking=True), \
-                                                                  data['box_masks'].to(device, non_blocking=True), \
-                                                                  data['region_labels'].to(device, non_blocking=True)
-                    if self.att_cls:
-                        attribute_labels = data['attribute_labels'].to(device, non_blocking=True)
+                batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if key in self.keys}
+                # images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
+                #                                      data['text'].to(device, non_blocking=True), \
+                #                                      data['mask'].to(device, non_blocking=True)
+                # boxes, box_labels, region_labels, box_masks = None, None, None, None
+                # if self.region_cls:
+                #     boxes, box_labels, box_masks, region_labels = data['boxes'].to(device, non_blocking=True), \
+                #                                                   data['box_labels'].to(device, non_blocking=True), \
+                #                                                   data['box_masks'].to(device, non_blocking=True), \
+                #                                                   data['region_labels'].to(device, non_blocking=True)
+                #     if self.att_cls:
+                #         attribute_labels = data['attribute_labels'].to(device, non_blocking=True)
 
                 self.optimizer.zero_grad()
                 with autocast(dtype=torch.float16):
                     # region logits is None when att_cls disabled
-                    output = self.model(images, reports_ids, boxes=boxes, box_labels=box_labels, box_masks=box_masks,
-                                        mode='train')
+                    output = self.model(batch_dict,mode='train')
                     rrg_preds = output['rrg_preds']
-                    loss = self.criterion(rrg_preds, reports_ids, reports_masks)
-                    ce_losses.update(loss.item(), images.size(0))
+                    loss = self.criterion(rrg_preds, batch_dict['text'], batch_dict['mask'])
+                    ce_losses.update(loss.item(), rrg_preds.size(0))
                     if self.region_cls:
                         region_logits = output['region_logits']
-                        region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
+                        region_cls_loss = self.region_cls_criterion(region_logits, batch_dict['region_labels'])
                         loss = loss + self.region_cls_w * region_cls_loss
-                        region_cls_losses.update(region_cls_loss.item(), images.size(0))
+                        region_cls_losses.update(region_cls_loss.item(), rrg_preds.size(0))
 
                     if self.att_cls:
                         attribute_logits = output['att_logits']
-                        attribute_cls_loss = self.att_cls_criterion(attribute_logits, attribute_labels)
+                        attribute_cls_loss = self.att_cls_criterion(attribute_logits, batch_dict['attribute_labels'])
                         loss = loss + self.att_cls_w * attribute_cls_loss
-                        attribute_cls_losses.update(attribute_cls_loss.item(), images.size(0))
+                        attribute_cls_losses.update(attribute_cls_loss.item(), rrg_preds.size(0))
 
                 self.scaler.scale(loss).backward()
 
@@ -391,14 +395,16 @@ class Trainer(BaseTrainer):
                 val_gts, val_res = [], []
                 for batch_idx, data in enumerate(
                         dataloader):
-                    images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
-                                                         data['text'].to(device, non_blocking=True), \
-                                                         data['mask'].to(device, non_blocking=True)
-                    total_attn, boxes, return_feats, box_labels = None, None, None, None
+                    # images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
+                    #                                      data['text'].to(device, non_blocking=True), \
+                    #                                      data['mask'].to(device, non_blocking=True)
+                    # total_attn, boxes, return_feats, box_labels = None, None, None, None
+                    batch_dict = {key:data[key].to(device, non_blocking=True) for key in data.keys() if key in self.keys}
                     if self.region_cls:
-                        boxes, box_labels, region_labels = data['boxes'].to(device, non_blocking=True), \
-                                                                      data['box_labels'].to(device, non_blocking=True), \
-                                                                      data['region_labels'].to(device,non_blocking=True)
+                        # boxes, box_labels, region_labels = data['boxes'].to(device, non_blocking=True), \
+                        #                                    data['box_labels'].to(device, non_blocking=True), \
+                        #                                    data['region_labels'].to(device, non_blocking=True)
+                        region_labels = batch_dict['region_labels']
                         region_masks = get_region_mask(region_labels).cpu()
                         region_labels = region_labels[region_masks]
 
@@ -410,15 +416,13 @@ class Trainer(BaseTrainer):
 
                     with autocast(dtype=torch.float16):
                         if split == 'val':
-                            output = self.model(images, reports_ids, boxes=boxes, box_labels=box_labels,
-                                                mode='train', return_feats=True)
+                            output = self.model(batch_dict,mode='train', return_feats=True)
                             rrg_preds = output['rrg_preds']
-                            loss = self.criterion(rrg_preds, reports_ids, reports_masks)
-                            val_ce_losses.update(loss.item())
+                            loss = self.criterion(rrg_preds, batch_dict['text'], batch_dict['mask'])
+                            val_ce_losses.update(loss.item(),rrg_preds.size(0))
                         # output, _ = self.model(images,reports_ids,mode='sample')
                         else:
-                            output = self.model(images, reports_ids, boxes=boxes, box_labels=box_labels,
-                                                mode='sample', return_feats=True)
+                            output = self.model(batch_dict,mode='sample', return_feats=True)
 
                         patch_feats = output['encoded_img_feats']
                         if self.region_cls:
@@ -451,7 +455,7 @@ class Trainer(BaseTrainer):
                         output = self.beam_search.sample(self.model.module, patch_feats=patch_feats)
 
                     reports = self.tokenizer.decode_batch(output['preds'].numpy())
-                    ground_truths = self.tokenizer.decode_batch(reports_ids[:, 1:].cpu().numpy())
+                    ground_truths = self.tokenizer.decode_batch(batch_dict['text'][:, 1:].cpu().numpy())
                     val_res.extend(reports)
                     val_gts.extend(ground_truths)
                     memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)

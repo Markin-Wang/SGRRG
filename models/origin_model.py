@@ -73,20 +73,21 @@ class RRGModel(nn.Module):
         patch_feats = self.encoder_decoder.model.encode(patch_feats, att_masks)
         return patch_feats, seq, att_masks, seq_mask
 
-    def forward(self, images, targets=None, boxes=None, box_labels=None, box_masks=None, att_labels=None,
-                return_feats=False,mode='sample'):
+    def forward(self, batch_dict,return_feats=False, mode='sample'):
+
+        images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs = None, None, None, None
         return_dicts = {}
 
         patch_feats, gbl_feats = self.extract_img_feats(images)
         if self.region_cls:
+            boxes, box_labels, box_masks = batch_dict['boxes'], batch_dict['box_labels'], batch_dict['box_masks']
             if mode != 'train' or return_feats:
                 region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, box_masks)
                 region_probs = torch.sigmoid(region_logits)
             else:
                 # box_masks is used to judge whether in val/test
                 region_logits = self.region_selector(gbl_feats, boxes, box_labels, box_masks)
-
 
         if self.att_cls:
             box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
@@ -96,10 +97,8 @@ class RRGModel(nn.Module):
                 att_probs = torch.sigmoid(att_logits)
 
         if self.use_sg:
-
-            output = self.scene_graph_encoder(boxes[box_masks],box_feats,att_labels,att_probs)
-
-
+            attribute_ids = batch_dict['attribute_ids']
+            output = self.scene_graph_encoder(boxes[box_masks], box_feats, box_labels[box_masks], attribute_ids, att_probs)
 
         encoded_img_feats, seq, att_masks, seq_mask = self.encode_img_feats(patch_feats, targets)
 

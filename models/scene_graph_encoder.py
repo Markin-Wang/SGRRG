@@ -1,9 +1,10 @@
 import torch.nn as nn
 import copy
-from modules.standard_trans import MultiHeadedAttention, PositionwiseFeedForward,SublayerConnection, Encoder
+from modules.standard_trans import MultiHeadedAttention, PositionwiseFeedForward,SublayerConnection, Encoder, EncoderLayer
 from modules.utils import init_weights
 from config import catid2attrange
 import numpy as np
+import torch
 
 class SceneGraphEncoder(nn.Module):
     def __init__(self,config):
@@ -15,22 +16,21 @@ class SceneGraphEncoder(nn.Module):
         self.num_layers_sgen = config['num_layers_sgen']
         self.num_classes = config['num_classes']
         self.num_heads = config['num_heads']
+        self.drop_prob_lm = config['dropout']
+        self.d_ff = config['d_ff']
+        #self.dropout = config['dropout']
+        self.att_select_threshold = config['att_select_threshold']
+        self.att_pad_idx = config['att_pad_idx']
 
         self.token_type_embeddings = nn.Embedding(self.num_classes+1,self.hidden_size)
         self.token_type_embeddings.apply(init_weights)
 
-        self.proj = nn.Sequential(
-            nn.Linear(self.feature_size,self.hidden_size),
-            nn.BatchNorm1d(self.hidden_size),
-            nn.GELU(),
-        )
+        self.proj = nn.Linear(self.feature_size,self.hidden_size)
+        self.gelu = nn.GELU()
+        self.norm = nn.LayerNorm(self.hidden_size)
+        self.pre_dropout = nn.Dropout(p=self.drop_prob_lm)
 
         self.proj.apply(init_weights)
-
-        self.d_ff = config['d_ff']
-        self.dropout = config['dropout']
-        self.att_select_threshold = config['att_select_threshold']
-        self.att_pad_idx = config['att_pad_idx']
 
         self.att_embedding = nn.Embedding(self.num_attributes,self.hidden_size)
 
@@ -43,31 +43,37 @@ class SceneGraphEncoder(nn.Module):
             self.attribute_mask[i][self.catid2attrange[i]] = True
 
         attention = MultiHeadedAttention(self.num_heads, self.hidden_size, use_rpe=None)
-        ff = PositionwiseFeedForward(self.hidden_size, self.d_ff, self.dropout)
+        ff = PositionwiseFeedForward(self.hidden_size, self.d_ff, self.drop_prob_lm)
 
-        self.sg_encoder = Encoder(EncoderLayer(self.hidden_size, attention, ff, self.dropout), self.num_layers_sgen,ape=None)
+        self.sg_encoder = Encoder(EncoderLayer(self.hidden_size, attention, ff, self.drop_prob_lm), self.num_layers_sgen,ape=None)
         self.sg_encoder.apply(init_weights)
 
 
     def forward(self,boxes,box_feats,box_labels,att_ids=None,att_probs=None):
         if att_ids is None:
-            assert att_logits is not None
+            assert att_probs is not None
             att_labels = att_probs > self.att_select_threshold
             att_masks = self.attribute_mask[box_labels]
             att_labels = att_labels & att_masks
             att_ids = self._prepare_att(att_labels)
-        att_masks = torch.zeros((bs, max_len)).to(box_feats.device)
-        att_masks[att_ids == self.att_pad_idx] = torch.finfo(type).min
 
-        att_embed = self.att_embedding(att_ids) + self.token_type_embeddings(self.num_classes)
+        att_masks = torch.zeros((box_feats.shape[0], att_ids.shape[-1])).to(box_feats.device)
+        att_masks[att_ids == self.att_pad_idx] = torch.finfo(box_feats.dtype).min
 
-        obj_embed = self.proj(box_feats) + self.token_type_embeddings(box_labels.view(1,-1))
+        att_type = torch.full((att_ids.shape[0],1),self.num_classes,device=att_ids.device)
 
-        node_embed = torch.cat((obj_embed,att_embed),dim=1)
+        att_embed = self.att_embedding(att_ids) + self.token_type_embeddings(att_type)
 
-        obj_masks = att_masks.full(node_embed.shape[0,],1)
 
-        node_masks = torch.cat((obj_masks,att_masks),dim=1)
+        obj_embed = self.gelu(self.proj(box_feats)) + self.token_type_embeddings(box_labels.view(-1))
+        obj_embed = obj_embed.unsqueeze(1)
+
+        node_embed = self.norm(torch.cat((obj_embed,att_embed),dim=1))
+
+        obj_masks = torch.full((node_embed.shape[0],1),0,device=node_embed.device)
+
+
+        node_masks = torch.cat((obj_masks,att_masks),dim=1).unsqueeze(1) # [bs,1,L]
 
         sg_embed = self.sg_encoder(node_embed,node_masks)
 

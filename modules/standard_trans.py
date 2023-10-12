@@ -184,6 +184,7 @@ class MultiHeadedAttention(nn.Module):
         # with autocast(enabled=False):
         #     scores = (torch.matmul(query.float(), key.float().transpose(-2, -1)) / math.sqrt(d_k))
         scores = (torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k))
+
         if self.use_rpe:
             relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
                 self.height * self.width, self.height * self.width, -1)  # Wh*Ww,Wh*Ww,nH
@@ -323,9 +324,9 @@ class EncoderDecoder(nn.Module):
         # self.cls_logit = nn.Linear(args.d_model, 14)
         self.att_embed = nn.Sequential(
             nn.Linear(self.att_feat_size, self.input_encoding_size),
-            nn.ReLU(inplace=True),
-            *([nn.Dropout(self.drop_prob_lm)] if self.use_dropout else []),
-            *([nn.LayerNorm(self.input_encoding_size)] if self.use_ln else [])
+            nn.GELU(),
+            *([nn.LayerNorm(self.input_encoding_size)] if self.use_ln else []),
+            *([nn.Dropout(p=self.drop_prob_lm)] if self.use_dropout else []),
         )
 
     def init_hidden(self, bsz):
