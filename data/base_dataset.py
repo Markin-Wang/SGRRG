@@ -180,7 +180,8 @@ class BaseDatasetArrow(Dataset):
         return ret
 
     def __len__(self):
-        return len(self.all_texts) // 1000  if self.debug and self.split=='train' else len(self.all_texts)
+        ratio = 100 if self.split =='train' else 10
+        return len(self.all_texts) // ratio  if self.debug else len(self.all_texts)
 
 
 

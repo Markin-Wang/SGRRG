@@ -11,7 +11,7 @@ from modules.my_encoder_decoder import LayerNorm
 from modules.old_forebacklearning import ForeBackLearning
 from modules.utils import load_ape
 from modules.standard_trans import subsequent_mask
-from modules.utils import init_weights
+from modules.utils import init_weights,init_weights_origin
 from .attribute_predictor import AttributePredictor
 from .region_selector import RegionSelector
 from .scene_graph_encoder import SceneGraphEncoder
@@ -51,14 +51,19 @@ class RRGModel(nn.Module):
         )
         self.att_embed.apply(init_weights)
 
-        self.vision_encoder =  VisionEncoder(config)
-        self.vision_encoder.apply(init_weights)
+        self.vision_encoder =  VisionEncoder(config) # has list, may not recognize
 
         self.word_embedding = BasicEmbedding(config)
-        self.word_embedding.apply(init_weights)
 
         self.decoder = Decoder(config)
+
+        self.vision_encoder.apply(init_weights)
+        self.word_embedding.apply(init_weights)
         self.decoder.apply(init_weights)
+
+        # init_weights_origin((self.vision_encoder))
+        # init_weights_origin(self.word_embedding)
+        # init_weights_origin(self.decoder)
 
         self.rrg_head = nn.Linear(self.hidden_size, config['vocab_size'])
         self.rrg_head.apply(init_weights)
@@ -113,10 +118,10 @@ class RRGModel(nn.Module):
         return_dicts = {}
 
         patch_feats, gbl_feats = self.extract_img_feats(images)
+
         if self.region_cls:
             boxes, box_labels,box_masks = batch_dict['boxes'], batch_dict['box_labels'],batch_dict['box_masks']
             region_logits = self.region_selector(gbl_feats, boxes, box_labels, box_masks)
-            region_probs = torch.sigmoid(region_logits)
 
         if self.att_cls:
             box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
@@ -132,9 +137,9 @@ class RRGModel(nn.Module):
         # obtain seq mask, should generated in dataloader
         patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
 
-        encoded_img_feats = self.encode_img_feats(patch_feats,att_masks)
+        patch_feats = self.encode_img_feats(patch_feats,att_masks)
 
-        text_embed, align_attns = self.get_text_feats(seq, encoded_img_feats, self_mask=seq_masks, cross_mask=att_masks)
+        text_embed, align_attns = self.get_text_feats(seq, patch_feats, self_mask=seq_masks, cross_mask=att_masks)
         # output, align_attns = self.encoder_decoder(encoded_img_feats, seq, att_masks, seq_mask)
         output = self.rrg_head(text_embed)
 
@@ -167,9 +172,9 @@ class RRGModel(nn.Module):
 
         patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
 
-        encoded_img_feats = self.encode_img_feats(patch_feats, att_masks)
+        patch_feats = self.encode_img_feats(patch_feats, att_masks)
 
-        return_dicts.update({'encoded_img_feats': encoded_img_feats,
+        return_dicts.update({'encoded_img_feats': patch_feats,
                              'region_logits': region_logits,
                              'region_probs': region_probs,
                              'att_probs': att_probs,
@@ -190,9 +195,9 @@ class RRGModel(nn.Module):
         seq_mask = subsequent_mask(ys.size(1), type=patch_feats.dtype).to(
             patch_feats.device)
         out, attns = self.get_text_feats(ys, patch_feats,seq_mask, mask)
-        out = self.rrg_head(out)
+        out = self.rrg_head(out[:,-1])
 
-        return out[:, -1], [ys.unsqueeze(0)]
+        return out, [ys.unsqueeze(0)]
 
 
     def _prepare_feature(self, att_feats, att_masks):

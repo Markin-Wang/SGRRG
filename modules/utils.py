@@ -441,6 +441,11 @@ def init_weights(module):
     if isinstance(module, nn.Linear) and module.bias is not None:
         module.bias.data.zero_()
 
+def init_weights_origin(module):
+    for p in module.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
+
 def calculate_auc(preds, targets):
     # preds: numpy array with shape [N samples, num_classes]
     # target: the same shape as preds

@@ -422,6 +422,7 @@ class Trainer(BaseTrainer):
                         output = self.model(batch_dict,mode='sample')
 
                         patch_feats = output['encoded_img_feats']
+
                         if self.region_cls:
                             region_logits = output['region_logits'][region_masks]
                             region_probs = output['region_probs'][region_masks]
