@@ -45,9 +45,9 @@ class RRGModel(nn.Module):
 
         self.att_embed = nn.Sequential(
             nn.Linear(self.att_feat_size, self.hidden_size),
-            *([nn.LayerNorm(self.hidden_size)] if self.use_ln else []),
             nn.GELU(),
             *([nn.Dropout(p=self.drop_prob_lm)] if self.use_dropout else []),
+            *([nn.LayerNorm(self.hidden_size)] if self.use_ln else []),
         )
         self.att_embed.apply(init_weights)
 
