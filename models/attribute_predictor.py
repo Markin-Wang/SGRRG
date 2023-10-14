@@ -28,9 +28,9 @@ class AttributePredictor(nn.Module):
 
         self.ff = nn.Sequential(
             nn.Linear(self.feature_size, self.feature_size),
-            nn.LayerNorm(self.feature_size),
             nn.GELU(),
-            nn.Dropout(p=self.drop_prob_lm)
+            nn.LayerNorm(self.feature_size),
+            nn.Dropout(p=self.drop_prob_lm),
         )
         self.ff.apply(init_weights)
 

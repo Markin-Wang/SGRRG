@@ -88,7 +88,7 @@ class EncoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 2)
 
-    def forward(self, x, mask, sg_embeds, sg_masks):
+    def forward(self, x, mask, sg_embeds=None, sg_masks=None):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
         return self.sublayer[1](x, self.feed_forward), self.self_attn.attn
 
