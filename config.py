@@ -117,6 +117,7 @@ def config():
     att_pad_idx = -100
     region_cls_only = False # perform region classification in visual extractor
     region_cls = False
+    region_cls_w = 0.5
     num_attributes = 884 # for one head attribute classification
     use_box_feats = False
 

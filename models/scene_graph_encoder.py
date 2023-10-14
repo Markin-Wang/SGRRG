@@ -24,6 +24,9 @@ class SceneGraphEncoder(nn.Module):
         self.att_select_threshold = config['att_select_threshold']
         self.att_pad_idx = config['att_pad_idx']
 
+
+        self.zero_count = 0
+
         self.token_type_embeddings = nn.Embedding(self.num_classes + 1, self.hidden_size)
         self.token_type_embeddings.apply(init_weights)
 
@@ -33,7 +36,8 @@ class SceneGraphEncoder(nn.Module):
 
         self.proj.apply(init_weights)
 
-        self.att_embedding = nn.Embedding(self.num_attributes + 1, self.hidden_size, padding_idx=self.num_attributes + 1)  # the last one is for the mask
+        self.att_embedding = nn.Embedding(self.num_attributes + 1, self.hidden_size,
+                                          padding_idx=self.num_attributes)  # the last one is for the mask
 
         self.att_embedding.apply(init_weights)
 
@@ -43,8 +47,6 @@ class SceneGraphEncoder(nn.Module):
 
         self.att_norm = nn.LayerNorm(self.hidden_size)
 
-
-
         attention = MultiHeadedAttention(self.num_heads, self.hidden_size, use_rpe=None)
         ff = PositionwiseFeedForward(self.hidden_size, self.d_ff, self.drop_prob_lm)
 
@@ -52,20 +54,19 @@ class SceneGraphEncoder(nn.Module):
                                   self.num_layers_sgen, ape=None)
         self.sg_encoder.apply(init_weights)
 
-        attribute_mask = torch.full((self.num_classes, self.num_attributes), False)
-        for i in range(self.attribute_mask.shape[0]):
-            attribute_mask[i][self.catid2attrange[i][0]:self.catid2attrange[i][1] + 1] = True
+        attribute_masks = torch.full((self.num_classes, self.num_attributes), False)
+        for i in range(attribute_masks.shape[0]):
+            attribute_masks[i][self.catid2attrange[i][0]:self.catid2attrange[i][1] + 1] = True
 
         self.register_buffer(
-            "attribute_mask", attribute_mask, persistent=False
+            "attribute_masks", attribute_masks, persistent=False
         )
 
-    def forward(self, boxes, box_feats, box_labels, att_ids=None, att_probs=None):
+    def forward(self, boxes, box_feats, box_labels, batch_size, att_ids=None, att_probs=None):
         if att_ids is None:
             assert att_probs is not None
-            attribute_mask = self.attribute_mask.to(box_labels.device)
             att_labels = att_probs > self.att_select_threshold
-            att_masks = attribute_mask[box_labels]
+            att_masks = self.attribute_masks[box_labels]
             att_labels = att_labels & att_masks
             att_ids = self._prepare_att(att_labels)
 
@@ -78,21 +79,23 @@ class SceneGraphEncoder(nn.Module):
         att_embed = self.att_embedding(att_ids) + self.token_type_embeddings(att_type)
         att_embed = self.att_norm(att_embed)
 
-        obj_embed = self.proj(box_feats) + self.token_type_embeddings(box_labels.view(-1))
+        obj_embeds = self.proj(box_feats) + self.token_type_embeddings(box_labels.view(-1))
 
-        obj_embed = self.obj_norm(obj_embed)
+        obj_embeds = self.obj_norm(obj_embeds)
 
-        obj_embed = obj_embed.unsqueeze(1)
+        obj_embeds = obj_embeds.unsqueeze(1)
 
-        node_embed = self.pre_dropout(torch.cat((obj_embed, att_embed), dim=1))
+        node_embeds = self.pre_dropout(torch.cat((obj_embeds, att_embed), dim=1))
 
-        obj_masks = torch.full((node_embed.shape[0], 1), 0, device=node_embed.device)
+        obj_masks = torch.full((node_embeds.shape[0], 1), 0, device=node_embeds.device)
 
         node_masks = torch.cat((obj_masks, att_masks), dim=1).unsqueeze(1)  # [bs,1,L]
 
-        sg_embed = self.sg_encoder(node_embed, node_masks)
+        sg_embeds = self.sg_encoder(node_embeds, node_masks)
 
-        return sg_embed
+        sg_embeds, sg_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks, batch_size)
+
+        return sg_embeds, sg_masks
 
     def _prepare_att(self, att_labels):
         max_len = max(torch.sum(att_labels, dim=1))
@@ -103,3 +106,28 @@ class SceneGraphEncoder(nn.Module):
             att_ids[i, :len(idx)] = idx
 
         return att_ids
+
+    def _to_bs_format(self, bs_ids, node_embeds, node_masks, batch_size):
+        max_len = -1
+        num_nodes = torch.sum(node_masks == 0, dim=-1)
+        node_masks = node_masks.squeeze(1)
+        reformed_node_list = []
+        for i in range(batch_size):
+            cur_bs_ids = bs_ids == i
+            cur_num_nodes, cur_node_masks = num_nodes[cur_bs_ids], node_masks[cur_bs_ids]
+            max_len = max(sum(cur_num_nodes), max_len)
+            cur_node_embeds = node_embeds[cur_bs_ids][cur_node_masks == 0]
+            reformed_node_list.append(cur_node_embeds)
+
+        reformed_node_embeds = torch.zeros(batch_size, max_len, node_embeds.shape[-1], device=node_embeds.device)
+        reformed_node_masks = torch.full((batch_size, max_len), torch.finfo(node_embeds.dtype).min,
+                                         device=node_embeds.device)
+        for i in range(batch_size):
+            if len(reformed_node_list[i]) == 0:
+                self.zero_count += 1
+                print(f'Total {self.zero_count} samples without region selected.')
+            #print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
+            reformed_node_embeds[i, :len(reformed_node_list[i])] = reformed_node_list[i]
+            reformed_node_masks[i, :len(reformed_node_list[i])] = 0.0
+
+        return reformed_node_embeds, reformed_node_masks.unsqueeze(1)

@@ -36,7 +36,10 @@ class VisionEncoder(nn.Module):
 
         self.use_sg = config['use_sg']
 
-        self.layers = clones(EncoderLayer(config), self.num_layers)
+        if self.use_sg:
+            self.layers = clones(SceneGraphAidedEncoderLayer(config), self.num_layers)
+        else:
+            self.layers = clones(EncoderLayer(config), self.num_layers)
         self.norm = nn.LayerNorm(self.d_model)
 
         if self.pe == 'ape':
@@ -45,16 +48,16 @@ class VisionEncoder(nn.Module):
         else:
             self.ape = None
 
-    def forward(self, x, mask):
+    def forward(self, x, mask, sg_embeds=None,sg_masks=None):
         if self.ape is not None:
             x = x + self.ape
         for layer in self.layers:
-            x = layer(x, mask)
+            x, attn = layer(x, mask,sg_embeds,sg_masks)
         return self.norm(x)
 
 class SceneGraphAidedEncoderLayer(nn.Module):
-    def __init__(self, d_model, self_attn, cross_attn, feed_forward, dropout):
-        super(DecoderLayer, self).__init__()
+    def __init__(self, config):
+        super(SceneGraphAidedEncoderLayer, self).__init__()
         self.d_model = config['d_model']
         self.num_heads = config['num_heads']
         self.pe = config['pe']
@@ -66,10 +69,10 @@ class SceneGraphAidedEncoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 3)
 
-    def forward(self, x, sg_embed, self_mask, cross_mask):
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
+    def forward(self, x, self_mask, sg_embed, cross_mask):
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
         x = self.sublayer[1](x, lambda x: self.cross_attn(x, sg_embed, sg_embed, cross_mask))
-        return self.sublayer[2](x, self.feed_forward), self.src_attn.attn
+        return self.sublayer[2](x, self.feed_forward), self.cross_attn.attn
 
 
 class EncoderLayer(nn.Module):
@@ -87,7 +90,7 @@ class EncoderLayer(nn.Module):
 
     def forward(self, x, mask):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
-        return self.sublayer[1](x, self.feed_forward)
+        return self.sublayer[1](x, self.feed_forward), self.self_attn.attn
 
 
 class SublayerConnection(nn.Module):
@@ -162,7 +165,7 @@ class MultiHeadedAttention(nn.Module):
         if self.dropout is not None:
             p_attn = self.dropout(p_attn)
 
-        self.attn = p_attn
+        self.attn = p_attn.detach()
         x = torch.matmul(p_attn, value)
 
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
