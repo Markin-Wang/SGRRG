@@ -121,10 +121,13 @@ def config():
     num_attributes = 884 # for one head attribute classification
     use_box_feats = False
 
-    use_sg = False
+
 
     # scene graph setting
+    use_sg = False
     num_layers_sgen = 3
+    use_region_type_embed = False
+    use_focal_ls = False
 
 
     #

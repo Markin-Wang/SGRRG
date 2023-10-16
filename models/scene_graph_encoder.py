@@ -23,12 +23,18 @@ class SceneGraphEncoder(nn.Module):
         # self.dropout = config['dropout']
         self.att_select_threshold = config['att_select_threshold']
         self.att_pad_idx = config['att_pad_idx']
+        self.use_region_type_embed = config['use_region_type_embed']
 
 
         self.zero_count = 0
 
-        self.token_type_embeddings = nn.Embedding(self.num_classes + 1, self.hidden_size)
-        self.token_type_embeddings.apply(init_weights)
+        if self.use_region_type_embed:
+            self.token_type_embeddings = nn.Embedding(self.num_classes + 1, self.hidden_size)
+            self.token_type_embeddings.apply(init_weights)
+        else:
+            self.token_type_embeddings = nn.Embedding(2, self.hidden_size)
+            self.token_type_embeddings.apply(init_weights)
+
 
         self.proj = nn.Linear(self.feature_size, self.hidden_size)
 
@@ -43,7 +49,7 @@ class SceneGraphEncoder(nn.Module):
 
         self.catid2attrange = catid2attrange
 
-        self.obj_norm = nn.BatchNorm1d(self.hidden_size)
+        #self.obj_norm = nn.BatchNorm1d(self.hidden_size)
 
         self.att_norm = nn.LayerNorm(self.hidden_size)
 
@@ -75,17 +81,26 @@ class SceneGraphEncoder(nn.Module):
 
         att_ids[att_ids == self.att_pad_idx] = self.num_attributes  # change to the unused idx for attribute embedding
 
-        att_type = torch.full((att_ids.shape[0], 1), self.num_classes, device=att_ids.device)
+
+
+        if self.use_region_type_embed:
+            att_type = torch.full((att_ids.shape[0], 1), self.num_classes, device=att_ids.device)
+            obj_type = box_labels
+        else:
+            att_type = torch.full((att_ids.shape[0], 1), 1, device=att_ids.device)
+            obj_type = torch.full_like(box_labels, 0, dtype=torch.long)
+
         att_embed = self.att_embedding(att_ids) + self.token_type_embeddings(att_type)
-        att_embed = self.att_norm(att_embed)
 
-        obj_embeds = self.proj(box_feats) + self.token_type_embeddings(box_labels.view(-1))
+        att_embed = self.pre_dropout(self.att_norm(att_embed))
 
-        obj_embeds = self.obj_norm(obj_embeds)
+        obj_embeds = self.proj(box_feats) + self.token_type_embeddings(obj_type)
+
+        #obj_embeds = self.obj_norm(obj_embeds)
 
         obj_embeds = obj_embeds.unsqueeze(1)
 
-        node_embeds = self.pre_dropout(torch.cat((obj_embeds, att_embed), dim=1))
+        node_embeds = torch.cat((obj_embeds, att_embed), dim=1)
 
         obj_masks = torch.full((node_embeds.shape[0], 1), 0, device=node_embeds.device)
 
@@ -125,7 +140,6 @@ class SceneGraphEncoder(nn.Module):
         for i in range(batch_size):
             if len(reformed_node_list[i]) == 0:
                 self.zero_count += 1
-                print(f'Total {self.zero_count} samples without region selected.')
             #print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
             reformed_node_embeds[i, :len(reformed_node_list[i])] = reformed_node_list[i]
             reformed_node_masks[i, :len(reformed_node_list[i])] = 0.0

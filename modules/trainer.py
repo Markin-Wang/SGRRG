@@ -66,6 +66,7 @@ class BaseTrainer(object):
             self.att_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.att_cls_w = config['att_cls_w']
 
+        self.use_sg = config['use_sg']
         self.criterion = criterion
         self.metric_ftns = metric_ftns
 
@@ -156,6 +157,11 @@ class BaseTrainer(object):
                 self.logger.info("Validation performance didn\'t improve for {} epochs. " "Training stops.".format(
                     self.early_stop))
                 break
+
+            if self.use_sg:
+                zero_count = self.model.module.scene_graph_encoder.zero_count
+                self.model.module.scene_graph_encoder.zero_count = 0
+                self.logger.info(f'There are {zero_count} samples without any region selected in this epoch.' )
 
         if dist.get_rank() == self.local_rank:
             self._print_best()
@@ -302,6 +308,7 @@ class Trainer(BaseTrainer):
                   unit='it', total=len(self.train_dataloader)) as pbar:
             for batch_idx, data in enumerate(self.train_dataloader):
                 batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if key in self.keys}
+
                 # images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
                 #                                      data['text'].to(device, non_blocking=True), \
                 #                                      data['mask'].to(device, non_blocking=True)

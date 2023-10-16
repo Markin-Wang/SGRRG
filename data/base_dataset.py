@@ -21,6 +21,7 @@ from torchvision import datapoints
 from torchvision.transforms.v2 import functional as F
 import torchvision.transforms.v2 as transforms
 from config import id2cat
+from tqdm import tqdm
 
 class BaseDatasetArrow(Dataset):
     def __init__(self, config, split, tokenizer, transform=None, text_column_name='caption', name=None, test=None):
@@ -79,7 +80,6 @@ class BaseDatasetArrow(Dataset):
             self.attribute_anns, self.region_anns = self._parse_att_ann_info()
             self.att_labels = self.attributes['annotations']
             self.att_cat_info = self.attributes['attribute_info']
-
 
     def get_raw_image(self, index, image_key="image"):
         image_bytes = io.BytesIO(self.table[image_key][index].as_py())
@@ -180,9 +180,13 @@ class BaseDatasetArrow(Dataset):
         return ret
 
     def __len__(self):
-        ratio = 50 if self.split =='train' else 10
+        ratio = 25 if self.split =='train' else 10
         return len(self.all_texts) // ratio  if self.debug else len(self.all_texts)
 
+    def _test_att(self,img_id):
+        att_labels = self.get_attribute_label(img_id)
+        print(att_labels)
+        exit()
 
 
     def load_box_annotations(self, ann_file):
