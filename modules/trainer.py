@@ -61,14 +61,14 @@ class BaseTrainer(object):
         self.use_focal_ls = config['use_focal_ls']
         if self.region_cls:
             if self.use_focal_ls:
-                self.region_cls_criterion = AsymmetricLossOptimized(gamma_neg=0, gamma_pos=0, clip=0, reduction='mean')
+                self.region_cls_criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0, reduction='mean')
             else:
                 self.region_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.region_cls_w = config['region_cls_w']
 
         if self.att_cls:
             if self.use_focal_ls:
-                self.att_cls_criterion = AsymmetricLossOptimized(gamma_neg=0, gamma_pos=0, clip=0, reduction='mean')
+                self.att_cls_criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0, reduction='mean')
 
             else:
                 self.att_cls_criterion = torch.nn.BCEWithLogitsLoss()
