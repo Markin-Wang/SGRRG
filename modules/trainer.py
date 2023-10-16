@@ -15,7 +15,7 @@ import torch.distributed as dist
 from .utils import clip_grad_norm_, calculate_auc, get_region_mask
 import numpy as np
 from modules.beam_search import BeamSearch
-
+from modules.loss import AsymmetricLoss,AsymmetricLossOptimized
 
 # from modules.utils import get_grad_norm
 # import torch.distributed as dist
@@ -58,12 +58,20 @@ class BaseTrainer(object):
 
         self.region_cls = config['region_cls']
         self.clip_option = config['clip_option']
+        self.use_focal_ls = config['use_focal_ls']
         if self.region_cls:
-            self.region_cls_criterion = torch.nn.BCEWithLogitsLoss()
+            if self.use_focal_ls:
+                self.region_cls_criterion = AsymmetricLossOptimized(gamma_neg=0, gamma_pos=0, clip=0)
+            else:
+                self.region_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.region_cls_w = config['region_cls_w']
 
         if self.att_cls:
-            self.att_cls_criterion = torch.nn.BCEWithLogitsLoss()
+            if self.use_focal_ls:
+                self.att_cls_criterion = AsymmetricLossOptimized(gamma_neg=0, gamma_pos=0, clip=0)
+
+            else:
+                self.att_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.att_cls_w = config['att_cls_w']
 
         self.use_sg = config['use_sg']
