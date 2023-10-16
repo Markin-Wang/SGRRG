@@ -61,14 +61,14 @@ class BaseTrainer(object):
         self.use_focal_ls = config['use_focal_ls']
         if self.region_cls:
             if self.use_focal_ls:
-                self.region_cls_criterion = AsymmetricLossOptimized(gamma_neg=0, gamma_pos=0, clip=0)
+                self.region_cls_criterion = AsymmetricLossOptimized(gamma_neg=0, gamma_pos=0, clip=0, reduction='mean')
             else:
                 self.region_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.region_cls_w = config['region_cls_w']
 
         if self.att_cls:
             if self.use_focal_ls:
-                self.att_cls_criterion = AsymmetricLossOptimized(gamma_neg=0, gamma_pos=0, clip=0)
+                self.att_cls_criterion = AsymmetricLossOptimized(gamma_neg=0, gamma_pos=0, clip=0, reduction='mean')
 
             else:
                 self.att_cls_criterion = torch.nn.BCEWithLogitsLoss()
@@ -335,18 +335,18 @@ class Trainer(BaseTrainer):
                     output = self.model(batch_dict,mode='train')
                     rrg_preds = output['rrg_preds']
                     loss = self.criterion(rrg_preds, batch_dict['text'], batch_dict['mask'])
-                    ce_losses.update(loss.item(), rrg_preds.size(0))
+                    ce_losses.update(loss.item())
                     if self.region_cls:
                         region_logits = output['region_logits']
                         region_cls_loss = self.region_cls_criterion(region_logits, batch_dict['region_labels'])
                         loss = loss + self.region_cls_w * region_cls_loss
-                        region_cls_losses.update(region_cls_loss.item(), rrg_preds.size(0))
+                        region_cls_losses.update(region_cls_loss.item())
 
                     if self.att_cls:
                         attribute_logits = output['att_logits']
                         attribute_cls_loss = self.att_cls_criterion(attribute_logits, batch_dict['attribute_labels'])
                         loss = loss + self.att_cls_w * attribute_cls_loss
-                        attribute_cls_losses.update(attribute_cls_loss.item(), rrg_preds.size(0))
+                        attribute_cls_losses.update(attribute_cls_loss.item())
 
                 self.scaler.scale(loss).backward()
 
@@ -443,7 +443,7 @@ class Trainer(BaseTrainer):
                             region_probs = output['region_probs'][region_masks]
                             if len(region_labels) > 0:
                                 val_region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
-                                val_region_cls_losses.update(val_region_cls_loss.item(), sum(region_masks))
+                                val_region_cls_losses.update(val_region_cls_loss.item())
                                 if len(region_preds) > 0:
                                     region_preds = torch.cat((region_preds, region_probs.cpu()), dim=0)
                                     region_targets = torch.cat((region_targets, region_labels.cpu()), dim=0)
