@@ -19,7 +19,7 @@ class R2DataLoader(DataLoader):
     def __init__(self, config, tokenizer, split, shuffle, vis=False):
         self.config = config
         self.dataset_name = config['dataset_name']
-        self.batch_size = config['batch_size']
+        self.batch_size = config['batch_size'] if split == 'train' else config['eval_batch_size']
         self.shuffle = shuffle
         self.num_workers = config['num_workers']
         self.split = split
@@ -27,7 +27,6 @@ class R2DataLoader(DataLoader):
         self.vis = vis
         self.test = config['test']
         self.att_cls = config['att_cls']
-        if split != 'train' and self.batch_size > 200: self.batch_size //= 2
         g = torch.Generator()
         g.manual_seed(config['seed'])
 

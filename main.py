@@ -157,6 +157,21 @@ def main(_config):
     # build trainer and start to train
     trainer = Trainer(model, criterion, metrics, optimizer, lr_scheduler, dm, writer, logger, _config)
     trainer.train()
+
+    if _config["test_after"]:
+        model = RRGModel(tokenizer, logger, _config)
+        load_path = os.path.join(save_dir, 'model_best.pth')
+        state_dict = torch.load(load_path)
+        model.load_state_dict(state_dict)
+        model = model.to(device_id)
+        # if args.amp_opt_level != "O0":
+        #     model, optimizer = amp.initialize(model, optimizer, opt_level=args.amp_opt_level)
+
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id], broadcast_buffers=False,
+                                                          find_unused_parameters=_config['debug'])
+        logger.info(f'loading model weightsfrom {load_path}.')
+        trainer = Trainer(model, criterion, metrics, optimizer, lr_scheduler, dm, writer, logger, _config)
+        trainer.test()
     writer.close()
 
 

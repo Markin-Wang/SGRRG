@@ -29,6 +29,7 @@ def config():
     #     4096  # this is a desired batch size; pl trainer will accumulate gradients when per step batch is smaller.
     # )
     batch_size = 16
+    eval_batch_size = batch_size
     dataset_name = 'mimic_cxr'
     label_path = 'labels/labels.json'
     pretrained = ''

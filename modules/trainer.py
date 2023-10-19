@@ -119,6 +119,10 @@ class BaseTrainer(object):
     def _valid(self, epoch, split):
         raise NotImplementedError
 
+    @abstractmethod
+    def test(self, epoch, split):
+        raise NotImplementedError
+
     def train(self):
 
         not_improved_count = 0
@@ -486,3 +490,6 @@ class Trainer(BaseTrainer):
                 #     att_auc = calculate_auc(preds=attribute_preds, targets=attribute_targets)
                 #     log.update({f'{split}_att_auc': region_auc, f"{split}_att_loss": val_att_cls_losses.avg})
         return log
+
+    def test(self, epoch, split):
+        self._valid(epoch,'test')
