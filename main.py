@@ -161,7 +161,7 @@ def main(_config):
     if _config["test_after"]:
         model = RRGModel(tokenizer, logger, _config)
         load_path = os.path.join(save_dir, 'model_best.pth')
-        state_dict = torch.load(load_path)
+        state_dict = torch.load(load_path)['state_dict']
         model.load_state_dict(state_dict)
         model = model.to(device_id)
         # if args.amp_opt_level != "O0":
@@ -169,7 +169,7 @@ def main(_config):
 
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id], broadcast_buffers=False,
                                                           find_unused_parameters=_config['debug'])
-        logger.info(f'loading model weightsfrom {load_path}.')
+        logger.info(f'loading model weights from {load_path}.')
         trainer = Trainer(model, criterion, metrics, optimizer, lr_scheduler, dm, writer, logger, _config)
         trainer.test()
     writer.close()

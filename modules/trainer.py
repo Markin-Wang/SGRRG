@@ -44,6 +44,7 @@ class BaseTrainer(object):
         self.lr_scheduler = lr_scheduler
         self.clip_value = config['clip_value']
         self.use_amp = config['use_amp']
+        self.test_after = config['test_after']
         self.early_stop = config['early_stop']
         self.local_rank = config['local_rank']
         # if args.debug:
@@ -121,7 +122,7 @@ class BaseTrainer(object):
         raise NotImplementedError
 
     @abstractmethod
-    def test(self, epoch, split):
+    def test(self):
         raise NotImplementedError
 
     def train(self):
@@ -133,7 +134,8 @@ class BaseTrainer(object):
 
             # evaluate model performance according to configured metric,
             log.update(self._valid(epoch, 'val'))
-            log.update(self._valid(epoch, 'test'))
+            if not self.test_after:
+                log.update(self._valid(epoch, 'test'))
             # save logged informations into log dict
             # synchronize log in different gpu
             log = self._synchronize_data(log)
@@ -231,7 +233,7 @@ class BaseTrainer(object):
     def _save_checkpoint(self, epoch, save_best=False):
         state = {
             'epoch': epoch,
-            'state_dict': self.model.state_dict(),
+            'state_dict': self.model.module.state_dict(),
             'lr_scheduler': self.lr_scheduler.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'scaler': self.scaler.state_dict(),
@@ -276,13 +278,14 @@ class BaseTrainer(object):
             self.mnt_val_best = cur_metric
             self.best_recorder['val'].update(log)
 
-        cur_metric = log['test_BLEU_4'] + 0.5 * log['test_METEOR']
+        if not self.test_after:
+            cur_metric = log['test_BLEU_4'] + 0.5 * log['test_METEOR']
 
-        improved_test = (self.mnt_mode == 'min' and cur_metric <= self.mnt_test_best) or \
-                        (self.mnt_mode == 'max' and cur_metric > self.mnt_test_best)
-        if improved_test:
-            self.best_recorder['test'].update(log)
-            self.mnt_test_best = cur_metric
+            improved_test = (self.mnt_mode == 'min' and cur_metric <= self.mnt_test_best) or \
+                            (self.mnt_mode == 'max' and cur_metric > self.mnt_test_best)
+            if improved_test:
+                self.best_recorder['test'].update(log)
+                self.mnt_test_best = cur_metric
         return improved_val
 
     def _print_best(self):
@@ -494,6 +497,13 @@ class Trainer(BaseTrainer):
                 #     log.update({f'{split}_att_auc': region_auc, f"{split}_att_loss": val_att_cls_losses.avg})
         return log
 
-    def test(self, epoch, split):
-        self.logger('Starting evaluating the best checkpoint in test set.')
-        self._valid(epoch,'test')
+    def test(self):
+        self.logger.info('Starting evaluating the best checkpoint in test set.')
+        log = {}
+        log.update(self._valid(0, 'val'))
+        log.update(self._valid(0,'test'))
+        log = self._synchronize_data(log)
+        self.logger.info('The result for the best performed models in test set.')
+        for key, value in log.items():
+            self.logger.info('\t{:15s}: {}'.format(str(key), value))
+

@@ -153,6 +153,7 @@ def config():
     # Evaluation
     monitor_metric = 'BLEU_4'
 
+    test_after = False
     resume = False
     early_exit = False  # used for test
     layer_id = 2  # the layer id in encoder to select attention
