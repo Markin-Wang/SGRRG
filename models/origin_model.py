@@ -203,6 +203,19 @@ class RRGModel(nn.Module):
 
         return out, [ys.unsqueeze(0)]
 
+    def infer(self,text_ids, patch_feats,self_masks,cross_masks=None):
+
+        self_masks = self_masks[:, None, :].expand(patch_feats.size(0), text_ids.size(-1), text_ids.size(-1))
+        self_masks = 1.0 - self_masks
+        self_masks = self_masks.masked_fill(self_masks.bool(), torch.finfo(patch_feats.dtype).min)
+        sub_mask = subsequent_mask(text_ids.size(-1), type=patch_feats.dtype).to(
+            patch_feats.device)  # use add attention instead of filling
+        self_masks = self_masks + sub_mask
+
+        out, attns = self.get_text_feats(text_ids, patch_feats, self_masks, cross_masks)
+
+        return out
+
     def _prepare_feature(self, att_feats, att_masks):
 
         att_feats, seq, att_masks, seq_mask = self.prepare_feature_forward(att_feats, att_masks)

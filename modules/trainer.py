@@ -79,6 +79,7 @@ class BaseTrainer(object):
         self.metric_ftns = metric_ftns
 
         self.logger = logger
+        self.use_new_bs = config['use_new_bs']
 
         self.epochs = config['epochs']
         self.save_period = config['save_period']
@@ -467,8 +468,10 @@ class Trainer(BaseTrainer):
                         #         if len(attribute_labels) > 0:
                         #             attribute_preds = attribute_preds.cpu()
                         #             attribute_targets = attribute_targets.cpu()
-
-                        output = self.beam_search.sample(self.model.module, patch_feats=patch_feats)
+                        if self.use_new_bs:
+                            output = self.beam_search.caption_test_step(self.model.module, image_embeds=patch_feats)
+                        else:
+                            output = self.beam_search.sample(self.model.module, patch_feats=patch_feats)
 
                     reports = self.tokenizer.decode_batch(output['preds'].numpy())
                     ground_truths = self.tokenizer.decode_batch(batch_dict['text'][:, 1:].cpu().numpy())
@@ -492,4 +495,5 @@ class Trainer(BaseTrainer):
         return log
 
     def test(self, epoch, split):
+        self.logger('Starting evaluating the best checkpoint in test set.')
         self._valid(epoch,'test')

@@ -65,6 +65,7 @@ def config():
 
     # Beam Search
     sample_method = 'beam_search'
+    use_new_bs = False
     beam_size = 3
     temperature = 1.0
     sample_n = 1
