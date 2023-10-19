@@ -48,7 +48,7 @@ class BaseDatasetArrow(Dataset):
             self.tokenizer = Tokenizer(config, self.all_texts)
 
 
-        if self.dataset_name == 'mimic_cxr' and self.region_cls:
+        if self.dataset_name == 'chest_vg' and self.region_cls:
             # if self.split == 'train':
                 # 159434 training images both in chest vg mimic-cxr training set
                 #
@@ -180,7 +180,7 @@ class BaseDatasetArrow(Dataset):
         return ret
 
     def __len__(self):
-        ratio = 25 if self.split =='train' else 10
+        ratio = 100 if self.split =='train' else 10
         return len(self.all_texts) // ratio  if self.debug else len(self.all_texts)
 
     def _test_att(self,img_id):

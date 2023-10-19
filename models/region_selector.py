@@ -22,6 +22,7 @@ class RegionSelector(nn.Module):
         region_selected = region_probs > self.region_select_threshold# [bs, 29]
         region_selected = region_selected.view(-1) # [bs*29]
         num_box_categories = region_probs.size(1)
+
         box_labels_ = box_labels + boxes[:,0] * num_box_categories
         # select boxes that detected by dino and predicted by the region selector
         box_masks = region_selected[box_labels_.to(torch.long)]
