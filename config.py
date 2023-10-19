@@ -135,7 +135,7 @@ def config():
     #
     save_period = 1
     monitor_mode = 'max'
-    early_stop = 10
+    early_stop = 8
     fp16 = True
     balanced = False
     vis = False
@@ -154,6 +154,7 @@ def config():
     monitor_metric = 'BLEU_4'
 
     test_after = False
+    start_eval = 0 # the epoch starts to perform evaluation
     resume = False
     early_exit = False  # used for test
     layer_id = 2  # the layer id in encoder to select attention

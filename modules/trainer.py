@@ -52,6 +52,7 @@ class BaseTrainer(object):
         #         submodule.register_forward_hook(nan_hook)
         self.model = model
         self.att_cls = config['att_cls']  # attribute classification
+        self.start_eval = config['start_eval']
         # for name, module in self.model.named_modules():
         #     module.register_backward_hook(get_activations(name))
         self.optimizer = optimizer
@@ -133,36 +134,37 @@ class BaseTrainer(object):
             log = self._train_epoch(epoch)
 
             # evaluate model performance according to configured metric,
-            log.update(self._valid(epoch, 'val'))
-            if not self.test_after:
-                log.update(self._valid(epoch, 'test'))
-            # save logged informations into log dict
-            # synchronize log in different gpu
-            log = self._synchronize_data(log)
+            if epoch > self.start_eval:
+                log.update(self._valid(epoch, 'val'))
+                if not self.test_after:
+                    log.update(self._valid(epoch, 'test'))
+                # save logged informations into log dict
+                # synchronize log in different gpu
+                log = self._synchronize_data(log)
 
-            log['epoch'] = epoch
+                log['epoch'] = epoch
 
-            # print logged informations to the screen
-            for key, value in log.items():
-                self.logger.info('\t{:15s}: {}'.format(str(key), value))
+                # print logged informations to the screen
+                for key, value in log.items():
+                    self.logger.info('\t{:15s}: {}'.format(str(key), value))
 
-            improved = self._record_best(log)
+                improved = self._record_best(log)
 
-            best = False
+                best = False
 
-            if improved:
-                not_improved_count = 0
-                best = True
-                self.best_epoch = epoch
-            else:
-                not_improved_count += 1
+                if improved:
+                    not_improved_count = 0
+                    best = True
+                    self.best_epoch = epoch
+                else:
+                    not_improved_count += 1
 
-            self.logger.info('current best model in: {}'.format(self.best_epoch))
+                self.logger.info('current best model in: {}'.format(self.best_epoch))
 
-            if dist.get_rank() == self.local_rank and epoch % self.save_period == 0:
-                # save best checkpoint as model_best
-                self._save_checkpoint(epoch, save_best=best)
-                self._write_log_to_file(log, epoch)
+                if dist.get_rank() == self.local_rank and epoch % self.save_period == 0:
+                    # save best checkpoint as model_best
+                    self._save_checkpoint(epoch, save_best=best)
+                    self._write_log_to_file(log, epoch)
 
             torch.cuda.synchronize()
             epoch_time = time.time() - start
