@@ -315,7 +315,6 @@ class Trainer(BaseTrainer):
         with tqdm(desc='Epoch %d - train' % epoch, disable=dist.get_rank() != self.local_rank,
                   unit='it', total=len(self.train_dataloader)) as pbar:
             for batch_idx, data in enumerate(self.train_dataloader):
-                continue
                 batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if key in self.keys}
 
                 # images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
@@ -406,15 +405,7 @@ class Trainer(BaseTrainer):
                   disable=dist.get_rank() != self.local_rank) as pbar:
             with torch.no_grad():
                 val_gts, val_res = [], []
-                for batch_idx, data in enumerate(
-                        dataloader):
-                    image_id = data['img_id']
-                    boxes = data['boxes']
-                    images = data['image']
-                    for i in range(images.shape[0]):
-                        if i not in boxes[:, 0]:
-                            print(image_id[i])
-                    continue
+                for batch_idx, data in enumerate(dataloader):
                     # images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
                     #                                      data['text'].to(device, non_blocking=True), \
                     #                                      data['mask'].to(device, non_blocking=True)

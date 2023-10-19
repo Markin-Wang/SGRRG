@@ -48,7 +48,7 @@ class BaseDatasetArrow(Dataset):
             self.tokenizer = Tokenizer(config, self.all_texts)
 
 
-        if self.dataset_name == 'chest_vg' and self.region_cls:
+        if self.dataset_name != 'iu_xray' and self.region_cls:
             # if self.split == 'train':
                 # 159434 training images both in chest vg mimic-cxr training set
                 #

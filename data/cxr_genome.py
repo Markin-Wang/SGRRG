@@ -8,11 +8,11 @@ class CXRGenomeDatasetArrow(BaseDatasetArrow):
         self.split = split
 
         if split == "train":
-            name = "mimic_cxr_train_filter_att"
+            name = "cxr_gnome_train"
         elif split == "val":
-            name = "mimic_cxr_val"
+            name = "cxr_gnome_val"
         elif split == "test":
-            name = "mimic_cxr_test"
+            name = "cxr_gnome_test"
         else:
             name = None
 

@@ -185,14 +185,32 @@ def task_train_caption_mimic():
     epochs = 30
     lr_base = 5e-5
     mul_new = 2
-    img_backbone = 'swin_base_patch4_window12_384_in22k'
-    resolution_before = 384
-    image_size = 384
+    img_backbone = 'swin_base_patch4_window7_224_in22k'
+    resolution_before = 224
+    image_size = 224
     d_vf = 1024
     ed_name = 'st_trans'
     seed = 9223
     use_amp = True
 
+@ex.named_config
+def task_train_caption_cxr_gnome():
+    exp_name = 'cxr_gnome_test'
+    dataset_name = 'cxr_gnome'
+    dsr = 2
+    max_seq_length = 100
+    threshold = 10
+    batch_size = 16
+    epochs = 30
+    lr_base = 5e-5
+    mul_new = 2
+    img_backbone = 'swin_base_patch4_window7_224_in22k'
+    resolution_before = 224
+    image_size = 224
+    d_vf = 1024
+    ed_name = 'st_trans'
+    seed = 9223
+    use_amp = True
 
 # for mimic-cxr attribute classification
 id2cat  = [('left lung', 68),

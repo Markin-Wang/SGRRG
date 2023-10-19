@@ -77,6 +77,9 @@ class R2DataLoader(DataLoader):
         elif self.dataset_name.startswith('mimic'):
             self.dataset = MIMICMultiImageDatasetArrow(config=self.config, tokenizer=tokenizer, split=self.split,
                                                        transform=self.transform)
+        elif self.dataset_name.startswith('cxr_gnome'):
+            self.dataset = CXRGenomeDatasetArrow(config=self.config, tokenizer=tokenizer, split=self.split,
+                                                       transform=self.transform)
         else:
             raise NotImplementedError
 
