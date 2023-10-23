@@ -25,8 +25,6 @@ class SceneGraphEncoder(nn.Module):
         self.use_region_type_embed = config['use_region_type_embed']
         self.encode_type = config['encode_type']
 
-        self.zero_count = 0
-
         if self.use_region_type_embed:
             self.token_type_embeddings = nn.Embedding(self.num_classes + 1, self.hidden_size)
             self.token_type_embeddings.apply(init_weights)

@@ -1,6 +1,6 @@
 import torch.nn as nn
 from torchvision.ops.roi_pool import RoIPool
-from config import id2cat
+from config import cgnome_id2cat as id2cat
 from modules.utils import init_weights
 import torch
 
