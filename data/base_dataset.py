@@ -20,7 +20,7 @@ torchvision.disable_beta_transforms_warning()
 from torchvision import datapoints
 from torchvision.transforms.v2 import functional as F
 import torchvision.transforms.v2 as transforms
-from config import id2cat
+from config import cgnome_id2cat as id2cat
 from tqdm import tqdm
 import torch.distributed as dist
 

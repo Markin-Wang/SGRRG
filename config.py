@@ -201,7 +201,7 @@ def task_train_caption_mimic():
 def task_train_caption_cxr_gnome():
     exp_name = 'cxr_gnome_test'
     dataset_name = 'cxr_gnome'
-    dsr = 2
+    dsr = 1
     max_seq_length = 100
     threshold = 10
     batch_size = 16
