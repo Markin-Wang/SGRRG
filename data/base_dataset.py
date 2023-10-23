@@ -44,16 +44,19 @@ class BaseDatasetArrow(Dataset):
         self.text_column_name = text_column_name
         # self.all_texts = self.table[text_column_name].to_pandas().tolist()
         self.all_texts = self.table[text_column_name].to_pandas()
+        self.no_region_count = 0
 
         if split == 'train':
             self.tokenizer = Tokenizer(config, self.all_texts)
 
 
         if self.dataset_name != 'iu_xray' and self.region_cls:
-            if self.split == 'train':
+            # if self.split == 'train':
                 # 159434 training images both in chest vg mimic-cxr training set
                 # 113922 before in cgnome training set after 113480
-                # 7 images without a scene graph given in training set
+                # 7 images without a scene graph given in training set 113473 finally
+                # 2 images in val without sg
+                # 3 images in test without sg
 
                 # img_filter_path = os.path.join(root, 'annotations', f"{name}.json")
                 # with open(img_filter_path, 'r') as f:
@@ -61,16 +64,16 @@ class BaseDatasetArrow(Dataset):
                 # img_keys = set([img['id'] for img in img_filter_dict['images']])
                 # print(img_filter_dict.keys())
                 # filter training images based on no attributes get 158794 images
-                if dist.get_rank() == 0:
-                    no_attribute_ids = set(json.load(open(os.path.join(root, 'annotations', "no_sg_ids.json"), 'r')))
-                    mask = [self.table['image_id'][i].as_py() not in no_attribute_ids for i in range(len(self.table['image_id']))]
-                    print('before:', len(self.table['image_id']))
-                    self.table = self.table.filter(mask)
-                    with pa.OSFile(os.path.join(root, f'cxr_gnome_{split}_ft_atsg.arrow'), "wb") as sink:
-                        with pa.RecordBatchFileWriter(sink, self.table.schema) as writer:
-                            writer.write_table(self.table)
-                    print('after:', len(self.table['image_id']))
-                    exit()
+                # if dist.get_rank() == 0:
+                #     no_attribute_ids = set(json.load(open(os.path.join(root, 'annotations', "no_sg_ids.json"), 'r'))[split])
+                #     mask = [self.table['image_id'][i].as_py() not in no_attribute_ids for i in range(len(self.table['image_id']))]
+                #     print('before:', len(self.table['image_id']))
+                #     self.table = self.table.filter(mask)
+                #     with pa.OSFile(os.path.join(root, f'cxr_gnome_{split}_ft_sg.arrow'), "wb") as sink:
+                #         with pa.RecordBatchFileWriter(sink, self.table.schema) as writer:
+                #             writer.write_table(self.table)
+                #     print('after:', len(self.table['image_id']))
+                #     exit()
             # Form box annotation
 
             if split == 'train':
@@ -144,8 +147,10 @@ class BaseDatasetArrow(Dataset):
     def get_region_label(self,image_id):
         # some images without any regions mentioned, assign all zeros first,
         # 614 images in training filter set no attributes
-        # if image_id not in self.region_anns:
-        #     print(image_id)
+        if image_id not in self.region_anns:
+            self.no_region_count += 1
+            print(f'{self.no_region_count} have no regions.')
+
         return self.region_anns.get(image_id,torch.zeros(1,len(id2cat)))
 
     def get_box_mask(self,box_labels,region_labels):
@@ -184,7 +189,7 @@ class BaseDatasetArrow(Dataset):
         return ret
 
     def __len__(self):
-        ratio = 50 if self.split =='train' else 10
+        ratio = 50 if self.split =='train' else 1
         return len(self.all_texts) // ratio  if self.debug else len(self.all_texts)
 
     def _test_att(self,img_id):
