@@ -22,6 +22,7 @@ from torchvision.transforms.v2 import functional as F
 import torchvision.transforms.v2 as transforms
 from config import id2cat
 from tqdm import tqdm
+import torch.distributed as dist
 
 class BaseDatasetArrow(Dataset):
     def __init__(self, config, split, tokenizer, transform=None, text_column_name='caption', name=None, test=None):
@@ -49,24 +50,26 @@ class BaseDatasetArrow(Dataset):
 
 
         if self.dataset_name != 'iu_xray' and self.region_cls:
-            # if self.split == 'train':
+            if self.split == 'train':
                 # 159434 training images both in chest vg mimic-cxr training set
-                #
+                # 113922 before in cgnome training set
+
                 # img_filter_path = os.path.join(root, 'annotations', f"{name}.json")
                 # with open(img_filter_path, 'r') as f:
                 #     img_filter_dict = json.load(f)
                 # img_keys = set([img['id'] for img in img_filter_dict['images']])
                 # print(img_filter_dict.keys())
                 # filter training images based on no attributes get 158794 images
-                # no_attribute_ids = set(json.load(open(os.path.join(root, 'annotations', "no_attribute_ids.json"), 'r')))
-                # mask = [self.table['image_id'][i].as_py() not in no_attribute_ids for i in range(len(self.table['image_id']))]
-                # print('before:', len(self.table['image_id']))
-                # self.table = self.table.filter(mask)
-                # with pa.OSFile(os.path.join(root, f'mimic_cxr_{split}_filter_att.arrow'), "wb") as sink:
-                #     with pa.RecordBatchFileWriter(sink, self.table.schema) as writer:
-                #         writer.write_table(self.table)
-                # print('after:', len(self.table['image_id']))
-                # exit()
+                if dist.get_rank() == 0:
+                    no_attribute_ids = set(json.load(open(os.path.join(root, 'annotations', "no_attribute_ids.json"), 'r')))
+                    mask = [self.table['image_id'][i].as_py() not in no_attribute_ids for i in range(len(self.table['image_id']))]
+                    print('before:', len(self.table['image_id']))
+                    self.table = self.table.filter(mask)
+                    with pa.OSFile(os.path.join(root, f'cxr_gnome_{split}_filter_att.arrow'), "wb") as sink:
+                        with pa.RecordBatchFileWriter(sink, self.table.schema) as writer:
+                            writer.write_table(self.table)
+                    print('after:', len(self.table['image_id']))
+                    exit()
             # Form box annotation
 
             if split == 'train':
