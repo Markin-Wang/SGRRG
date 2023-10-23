@@ -8,7 +8,7 @@ class CXRGenomeDatasetArrow(BaseDatasetArrow):
         self.split = split
 
         if split == "train":
-            name = "cxr_gnome_train"
+            name = "cxr_gnome_train_filter_att"
         elif split == "val":
             name = "cxr_gnome_val"
         elif split == "test":
