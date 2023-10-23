@@ -52,7 +52,7 @@ class BaseDatasetArrow(Dataset):
         if self.dataset_name != 'iu_xray' and self.region_cls:
             if self.split == 'train':
                 # 159434 training images both in chest vg mimic-cxr training set
-                # 113922 before in cgnome training set
+                # 113922 before in cgnome training set after 113480
 
                 # img_filter_path = os.path.join(root, 'annotations', f"{name}.json")
                 # with open(img_filter_path, 'r') as f:
@@ -60,15 +60,15 @@ class BaseDatasetArrow(Dataset):
                 # img_keys = set([img['id'] for img in img_filter_dict['images']])
                 # print(img_filter_dict.keys())
                 # filter training images based on no attributes get 158794 images
-                no_attribute_ids = set(json.load(open(os.path.join(root, 'annotations', "no_attribute_ids.json"), 'r')))
-                mask = [self.table['image_id'][i].as_py() not in no_attribute_ids for i in range(len(self.table['image_id']))]
-                print('before:', len(self.table['image_id']))
-                self.table = self.table.filter(mask)
-                with pa.OSFile(os.path.join(root, f'cxr_gnome_{split}_filter_att.arrow'), "wb") as sink:
-                    with pa.RecordBatchFileWriter(sink, self.table.schema) as writer:
-                        writer.write_table(self.table)
-                print('after:', len(self.table['image_id']))
-                exit()
+                # no_attribute_ids = set(json.load(open(os.path.join(root, 'annotations', "no_attribute_ids.json"), 'r')))
+                # mask = [self.table['image_id'][i].as_py() not in no_attribute_ids for i in range(len(self.table['image_id']))]
+                # print('before:', len(self.table['image_id']))
+                # self.table = self.table.filter(mask)
+                # with pa.OSFile(os.path.join(root, f'cxr_gnome_{split}_filter_att.arrow'), "wb") as sink:
+                #     with pa.RecordBatchFileWriter(sink, self.table.schema) as writer:
+                #         writer.write_table(self.table)
+                # print('after:', len(self.table['image_id']))
+                # exit()
             # Form box annotation
 
             if split == 'train':
