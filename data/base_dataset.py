@@ -50,7 +50,7 @@ class BaseDatasetArrow(Dataset):
 
 
         if self.dataset_name != 'iu_xray' and self.region_cls:
-            if self.split == 'train':
+            # if self.split == 'train':
                 # 159434 training images both in chest vg mimic-cxr training set
                 # 113922 before in cgnome training set after 113480
 
