@@ -70,9 +70,9 @@ class BaseDatasetArrow(Dataset):
             # Form box annotation
 
             if split == 'train':
-                ann_file_path = os.path.join(root, 'annotations', 'mimic_cxr_train.json')
+                ann_file_path = os.path.join(root, 'annotations', f'box_train.json')
             else:
-                ann_file_path = os.path.join(root, 'annotations', f'mimic_cxr_{split}_dino.json')
+                ann_file_path = os.path.join(root, 'annotations', f'box_{split}_dino_th05.json')
             self.box_infos = self.load_box_annotations(ann_file_path)
 
             self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_1head.json')

@@ -214,7 +214,7 @@ class R2DataLoader(DataLoader):
                     temp_label = attribute_label[box_label.item()]
                     attribute_ids.append(temp_label)
                     max_att = max(max_att,len(temp_label))
-                    attribute_label_ = torch.zeros(1,884) # 884 attributes
+                    attribute_label_ = torch.zeros(1,849) # 849 attributes
                     attribute_label_[0,temp_label] = 1.0
                     attribute_labels.append(attribute_label_)
             if attribute_labels:

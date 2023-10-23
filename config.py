@@ -120,7 +120,7 @@ def config():
     region_cls_only = False # perform region classification in visual extractor
     region_cls = False
     region_cls_w = 0.5
-    num_attributes = 884 # for one head attribute classification
+    num_attributes = 849 # for one head attribute classification 848 for mimic-split
     use_box_feats = False
 
 
@@ -279,3 +279,65 @@ catid2attrange =np.array(
        [590, 598],
        [599, 611]]
 )
+
+
+# 849 attribute in total
+cgnome_id2cat = [('left lung', 67),
+ ('right lung', 67),
+ ('cardiac silhouette', 33),
+ ('mediastinum', 39),
+ ('left lower lung zone', 57),
+ ('right lower lung zone', 56),
+ ('right hilar structures', 46),
+ ('left hilar structures', 46),
+ ('upper mediastinum', 28),
+ ('left costophrenic angle', 32),
+ ('right costophrenic angle', 32),
+ ('left mid lung zone', 45),
+ ('right mid lung zone', 47),
+ ('aortic arch', 12),
+ ('right upper lung zone', 46),
+ ('left upper lung zone', 43),
+ ('right hemidiaphragm', 13),
+ ('right clavicle', 15),
+ ('left clavicle', 15),
+ ('left hemidiaphragm', 12),
+ ('right apical zone', 22),
+ ('trachea', 10),
+ ('left apical zone', 21),
+ ('carina', 4),
+ ('svc', 9),
+ ('right atrium', 7),
+ ('cavoatrial junction', 4),
+ ('abdomen', 9),
+ ('spine', 12)]
+
+cgnome_catid2attrange = np.array([[  0,  66],
+       [ 67, 133],
+       [134, 166],
+       [167, 205],
+       [206, 262],
+       [263, 318],
+       [319, 364],
+       [365, 410],
+       [411, 438],
+       [439, 470],
+       [471, 502],
+       [503, 547],
+       [548, 594],
+       [595, 606],
+       [607, 652],
+       [653, 695],
+       [696, 708],
+       [709, 723],
+       [724, 738],
+       [739, 750],
+       [751, 772],
+       [773, 782],
+       [783, 803],
+       [804, 807],
+       [808, 816],
+       [817, 823],
+       [824, 827],
+       [828, 836],
+       [837, 848]])
