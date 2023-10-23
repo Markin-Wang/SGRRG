@@ -188,10 +188,6 @@ class BaseDatasetArrow(Dataset):
         ret.update(txt)
         return ret
 
-    def __len__(self):
-        ratio = 50 if self.split =='train' else 1
-        return len(self.all_texts) // ratio  if self.debug else len(self.all_texts)
-
     def _test_att(self,img_id):
         att_labels = self.get_attribute_label(img_id)
         print(att_labels)
@@ -352,40 +348,6 @@ class BaseDatasetArrow(Dataset):
         return attribute_anns, region_anns
 
 
-
-class BaseDataset(Dataset):
-    def __init__(self, config, tokenizer, split, transform=None, test=None):
-        self.max_seq_length = config['max_seq_length']
-        self.split = split
-        self.tokenizer = tokenizer
-        self.transform = transform
-        self.test = test
-        root = os.path.join(config['data_dir'], config['dataset_name'])
-        self.image_dir = os.path.join(root, 'images')
-        self.ann_path = os.path.join(root, 'annotation.json')
-        self.ann = json.loads(open(self.ann_path, 'r').read())
-        self.labels_path = os.path.join(root, config['label_path'])
-        self.labels = json.loads(open(self.labels_path, 'r').read())
-        self.dataset_name = config['dataset_name']
-        if self.test:
-            selected_parts = ['p10']
-        self.examples = self.ann[self.split]
-        if self.test and self.split == 'train' and self.dataset_name != 'iu_xray':
-            self.examples = [e for part in selected_parts for e in self.examples if part == e['image_path'][0][:3]]
-        if self.dataset_name == 'iu_xray':
-            self._labels = []
-            for e in self.examples:
-                img_id = e['id']
-                array = img_id.split('-')
-                modified_id = array[0] + '-' + array[1]
-                self._labels.append(self.labels[modified_id])
-        else:
-            self._labels = [self.labels[e['id']] for e in self.examples]
-
-        for i in range(len(self.examples)):
-            self.examples[i]['ids'] = tokenizer(self.examples[i]['report'])
-            self.examples[i]['mask'] = [1] * len(self.examples[i]['ids'])
-        # print(111111, len(self.examples))
-
     def __len__(self):
-        return len(self.examples)
+        ratio = 10 if self.split =='train' else 1
+        return len(self.all_texts) // ratio  if self.debug else len(self.all_texts)

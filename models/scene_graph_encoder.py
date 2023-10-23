@@ -5,7 +5,11 @@ from modules.utils import init_weights
 from config import catid2attrange
 import numpy as np
 import torch
+import math
+import torch.nn.functional as F
 
+def clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 class SceneGraphEncoder(nn.Module):
     def __init__(self, config):
@@ -24,6 +28,7 @@ class SceneGraphEncoder(nn.Module):
         self.att_pad_idx = config['att_pad_idx']
         self.use_region_type_embed = config['use_region_type_embed']
         self.encode_type = config['encode_type']
+        self.zero_count = 0
 
         if self.use_region_type_embed:
             self.token_type_embeddings = nn.Embedding(self.num_classes + 1, self.hidden_size)
@@ -95,12 +100,14 @@ class SceneGraphEncoder(nn.Module):
             node_embeds = torch.cat((obj_embeds, att_embed), dim=1)
             node_masks = torch.cat((obj_masks, att_masks), dim=1).unsqueeze(1)  # [bs,1,L]
             sg_embeds = self.sg_encoder(node_embeds, node_masks)
-        elif self.encode_type == 'oc-d':
+        elif self.encode_type == 'oa-d':
             node_embeds = torch.cat((obj_embeds, att_embed), dim=1)
             node_masks = torch.cat((obj_masks, att_masks), dim=1).unsqueeze(1)  # [bs,1,L]
             sg_embeds = self.sg_encoder(obj_embeds, obj_masks,node_embeds,node_masks)
-        elif self.encode_type== 'oc-d':
+        elif self.encode_type== 'oa-dc':
             sg_embeds = self.sg_encoder(obj_embeds,obj_masks,att_embed,att_masks)
+        else:
+            raise NotImplementedError
 
 
         sg_embeds, sg_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks, batch_size)
@@ -135,16 +142,15 @@ class SceneGraphEncoder(nn.Module):
         for i in range(batch_size):
             if len(reformed_node_list[i]) == 0:
                 self.zero_count += 1
-            #print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
+                #print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
             reformed_node_embeds[i, :len(reformed_node_list[i])] = reformed_node_list[i]
             reformed_node_masks[i, :len(reformed_node_list[i])] = 0.0
 
         return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
 
-
 class SGEncoder(nn.Module):
     def __init__(self, config):
-        super(SceneGraphOACEncoder, self).__init__()
+        super(SGEncoder, self).__init__()
 
         self.d_model = config['d_model']
         self.encode_type = config['encode_type']
@@ -160,7 +166,7 @@ class SGEncoder(nn.Module):
         if self.encode_type == 'oa-c':
             # object-attribute coupled: node-att to node-att
             self.layers = clones(SGOACEncoderLayer(config), self.num_layers)
-        elif self.encode_type == 'oc-d' or self.encode_type == 'oc-dc':
+        elif self.encode_type == 'oa-d' or self.encode_type == 'oa-dc':
             # object-attribute decomposed: node to node-att then nodes to nodes
             # object-attribute decomposed completely: node to att then nodes to nodes
             self.layers = clones(SGOADEncoderLayer(config), self.num_layers)

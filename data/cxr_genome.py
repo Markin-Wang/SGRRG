@@ -1,4 +1,4 @@
-from .base_dataset import BaseDatasetArrow, BaseDataset
+from .base_dataset import BaseDatasetArrow
 from PIL import Image
 import numpy as np
 
