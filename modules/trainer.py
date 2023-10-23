@@ -502,7 +502,6 @@ class Trainer(BaseTrainer):
     def test(self):
         self.logger.info('Starting evaluating the best checkpoint in test set.')
         log = {}
-        log.update(self._valid(0, 'val'))
         log.update(self._valid(0,'test'))
         log = self._synchronize_data(log)
         self.logger.info('The result for the best performed models in test set.')
