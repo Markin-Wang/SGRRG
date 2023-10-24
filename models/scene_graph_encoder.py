@@ -142,6 +142,7 @@ class SceneGraphEncoder(nn.Module):
         for i in range(batch_size):
             if len(reformed_node_list[i]) == 0:
                 self.zero_count += 1
+                print(f'{self.zero_count} samples without any regions.')
                 #print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
             reformed_node_embeds[i, :len(reformed_node_list[i])] = reformed_node_list[i]
             reformed_node_masks[i, :len(reformed_node_list[i])] = 0.0
