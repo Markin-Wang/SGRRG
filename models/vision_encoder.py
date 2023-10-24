@@ -19,6 +19,7 @@ from modules.utils import load_embedding_layer, init_weights
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
+
 class VisionEncoder(nn.Module):
     def __init__(self, config):
         super(VisionEncoder, self).__init__()
@@ -48,12 +49,13 @@ class VisionEncoder(nn.Module):
         else:
             self.ape = None
 
-    def forward(self, x, mask, sg_embeds=None,sg_masks=None):
+    def forward(self, x, mask, sg_embeds=None, sg_masks=None):
         if self.ape is not None:
             x = x + self.ape
         for layer in self.layers:
-            x, attn = layer(x, mask,sg_embeds, sg_masks)
+            x, attn = layer(x, mask, sg_embeds, sg_masks)
         return self.norm(x)
+
 
 class SceneGraphAidedEncoderLayer(nn.Module):
     def __init__(self, config):
@@ -71,7 +73,12 @@ class SceneGraphAidedEncoderLayer(nn.Module):
 
     def forward(self, x, self_mask, sg_embed, cross_mask):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
-        x = self.sublayer[1](x, lambda x: self.cross_attn(x, sg_embed, sg_embed, cross_mask))
+        # cross_mask bs x 1 x len_sg
+        selected_bs = (cross_mask.squeeze(1) == 0).sum(-1) != 0
+        # print(cross_mask[0])
+        x[selected_bs] = self.sublayer[1](x[selected_bs],
+                                          lambda x: self.cross_attn(x, sg_embed[selected_bs], sg_embed[selected_bs],
+                                                                    cross_mask[selected_bs]))
         return self.sublayer[2](x, self.feed_forward), self.cross_attn.attn
 
 
@@ -101,6 +108,7 @@ class SublayerConnection(nn.Module):
 
     def forward(self, x, sublayer):
         return x + self.dropout(sublayer(self.norm(x)))
+
 
 class MultiHeadedAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1, use_rpe=False, height=7, width=7):
