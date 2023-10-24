@@ -89,7 +89,8 @@ class SceneGraphEncoder(nn.Module):
             obj_type = torch.full_like(box_labels, 0, dtype=torch.long)
 
         att_embed = self.att_embedding(att_ids) + self.token_type_embeddings(att_type)
-        att_embed = self.pre_dropout(self.att_norm(att_embed))
+        # att_embed = self.pre_dropout(self.att_norm(att_embed))
+        att_embed = self.pre_dropout(att_embed)
 
         obj_embeds = self.proj(box_feats) + self.token_type_embeddings(obj_type)
         #obj_embeds = self.obj_norm(obj_embeds)
@@ -142,7 +143,7 @@ class SceneGraphEncoder(nn.Module):
         for i in range(batch_size):
             if len(reformed_node_list[i]) == 0:
                 self.zero_count += 1
-                print(f'{self.zero_count} samples without any regions.')
+                # print(f'{self.zero_count} samples without any regions.')
                 #print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
             reformed_node_embeds[i, :len(reformed_node_list[i])] = reformed_node_list[i]
             reformed_node_masks[i, :len(reformed_node_list[i])] = 0.0
