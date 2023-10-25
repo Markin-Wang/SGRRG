@@ -52,8 +52,8 @@ class SceneGraphEncoder(nn.Module):
 
         #self.obj_norm = nn.BatchNorm1d(self.hidden_size)
 
-        self.att_norm = nn.LayerNorm(self.hidden_size)
-        self.att_norm.apply(init_weights)
+        # self.att_norm = nn.LayerNorm(self.hidden_size)
+        # self.att_norm.apply(init_weights)
 
         self.sg_encoder = SGEncoder(config)
         self.sg_encoder.apply(init_weights)
