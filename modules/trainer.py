@@ -182,7 +182,7 @@ class BaseTrainer(object):
                 self.model.module.scene_graph_encoder.zero_count = 0
                 self.logger.info(f'There are {zero_count} samples without any region selected in this epoch.')
                 self.logger.info(
-                    f'{self.model.module.scene_graph_encoder.zero_att_count / self.model.module.scene_graph_encoder.all_box_count * 100:.2f}% boxes without any attributes predicted.')
+                    f'{self.model.module.scene_graph_encoder.zero_att_count / (self.model.module.scene_graph_encoder.all_box_count+1) * 100:.2f}% boxes without any attributes predicted.')
                 self.model.module.scene_graph_encoder.zero_att_count = 0
                 self.model.module.scene_graph_encoder.all_box_count = 0
         if dist.get_rank() == self.local_rank:
