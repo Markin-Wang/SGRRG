@@ -1,11 +1,12 @@
 import torch
-from .utils import split_tensors,repeat_tensors,penalty_builder
+from .utils import split_tensors, repeat_tensors, penalty_builder
 import torch.nn.functional as F
+
 
 class BeamSearch:
     def __init__(self, config):
         super().__init__()
-        #self.model = pl_module
+        # self.model = pl_module
         self.beam_size = config['beam_size']
         self.group_size = config['group_size']
         self.sample_n = config['sample_n']
@@ -23,14 +24,15 @@ class BeamSearch:
         self.eos_idx = config['eos_idx']
         self.pad_idx = config['pad_idx']
         self.bos_idx = config['bos_idx']
+        self.sgade = config['sgade']
+        self.use_sg = config['use_sg']
 
-    def set_tokenidx(self,tokenizer):
+    def set_tokenidx(self, tokenizer):
         self.pad_idx = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
         self.bos_idx = tokenizer.convert_tokens_to_ids(tokenizer.cls_token)
         self.eos_idx = tokenizer.convert_tokens_to_ids(tokenizer.sep_token)
         self.sep_idx = tokenizer.convert_tokens_to_ids(tokenizer.sep_token)
         self.vocab_size = tokenizer.vocab_size
-
 
     def init_hidden(self, bsz):
         return []
@@ -47,7 +49,7 @@ class BeamSearch:
         assert sample_n == 1 or sample_n == beam_size // group_size, 'when beam search, sample_n == 1 or beam search'
         batch_size = patch_feats.size(0)
 
-        #p_fc_feats, p_att_feats, pp_att_feats, p_att_masks = self.model.prepare_feature(fc_feats, att_feats, att_masks)
+        # p_fc_feats, p_att_feats, pp_att_feats, p_att_masks = self.model.prepare_feature(fc_feats, att_feats, att_masks)
 
         assert beam_size <= self.vocab_size, 'lets assume this for now, otherwise this corner case causes a few headaches down the road. can be dealt with in future if needed'
         seq = patch_feats.new_full((batch_size * sample_n, self.max_seq_length), self.bos_idx, dtype=torch.long)
@@ -63,9 +65,9 @@ class BeamSearch:
         it = patch_feats.new_full([batch_size], self.bos_idx, dtype=torch.long)
         logprobs, state = model.core(it, patch_feats, mask, state)
 
-        #img_feats = repeat_tensors(beam_size,[img_feats]) # use this for multiple values
+        # img_feats = repeat_tensors(beam_size,[img_feats]) # use this for multiple values
 
-        patch_feats, mask = repeat_tensors(beam_size, [patch_feats,mask])
+        patch_feats, mask = repeat_tensors(beam_size, [patch_feats, mask])
         self.done_beams = self.beam_search(model, state, logprobs, patch_feats=patch_feats, mask=mask)
         # attns = []
         for k in range(batch_size):
@@ -87,9 +89,7 @@ class BeamSearch:
         # return {'preds':seq.detach().cpu(), 'preds_log':seqLogprobs.detach().cpu()}
         return {'preds': seq.detach().cpu()}
 
-
-
-    def beam_search(self, model, init_state, init_logprobs,patch_feats=None,mask=None):
+    def beam_search(self, model, init_state, init_logprobs, patch_feats=None, mask=None):
 
         # function computes the similarity score to be augmented
         def add_diversity(beam_seq_table, logprobs, t, divm, diversity_lambda, bdash):
@@ -179,7 +179,7 @@ class BeamSearch:
             return beam_seq, beam_seq_logprobs, beam_logprobs_sum, state
 
         # Start diverse_beam_search
-        temperature = self.temperature # This should not affect beam search, but will affect dbs
+        temperature = self.temperature  # This should not affect beam search, but will affect dbs
         beam_size = self.beam_size
         group_size = self.group_size
         diversity_lambda = self.diversity_lambda
@@ -204,7 +204,7 @@ class BeamSearch:
 
         # Chunk elements in the args
         args = [patch_feats, mask]
-        args = split_tensors(group_size, args)  #ßßßß For each arg, turn (Bbg)x... to (Bb)x(g)x...
+        args = split_tensors(group_size, args)  # ßßßß For each arg, turn (Bbg)x... to (Bb)x(g)x...
         if self.__class__.__name__ == 'AttEnsemble':
             args = [[[args[j][i][k] for i in range(len(self.models))] for j in range(len(args))] for k in
                     range(group_size)]  # group_name, arg_name, model_name
@@ -261,7 +261,7 @@ class BeamSearch:
                                     'logps': beam_seq_logprobs_table[divm][b, vix].clone().cpu(),
                                     'unaug_p': beam_seq_logprobs_table[divm][b, vix].sum().item(),
                                     'p': beam_logprobs_sum_table[divm][b, vix].item(),
-                                    #'attn': attns[b][vix] if self.vis else None
+                                    # 'attn': attns[b][vix] if self.vis else None
                                 }
                                 final_beam['p'] = length_penalty(t - divm + 1, final_beam['p'])
                                 done_beams_table[b][divm].append(final_beam)
@@ -270,7 +270,8 @@ class BeamSearch:
                     # move the current group one step forward in time
 
                     it = beam_seq_table[divm][:, :, t - divm].reshape(-1)
-                    logprobs_table[divm], state_table[divm] = model.core(it.to(device),*(args[divm] + [state_table[divm]]))
+                    logprobs_table[divm], state_table[divm] = model.core(it.to(device),
+                                                                         *(args[divm] + [state_table[divm]]))
                     # if self.vis:
                     #     attns = [attn.reshape(batch_size, -1, 1, *attn.shape[1:]) for attn in attns]
                     #     attns = torch.cat((attns[0], attns[1], attns[2]), dim=2).detach().cpu()
@@ -296,14 +297,13 @@ class BeamSearch:
 
         return done_beams
 
-
-
-
-    def caption_test_step(self, model, image_embeds):
+    def caption_test_step(self, model, batch_dict):
         captions = []
         max_len = self.max_seq_length
         if not model.training:
             # from fairseq
+            image_embeds = batch_dict['encoded_img_feats']
+            sg_embeds, sg_masks = batch_dict['sg_embeds'], batch_dict['sg_masks']
             bs = image_embeds.size(0)
             text_ids = torch.ones((bs, max_len), device=image_embeds.device, dtype=torch.long)
             text_ids[:, 0] = self.bos_idx
@@ -311,17 +311,17 @@ class BeamSearch:
             search_size = bs * self.beam_size
             end_seq = torch.zeros_like(text_ids[:, 0])
             end_seq = end_seq > 0
-            self_masks = torch.zeros((bs, max_len),device=image_embeds.device)
+            self_masks = torch.zeros((bs, max_len), device=image_embeds.device)
             self_masks[:, 0] = 1
 
-            text_feats = model.infer(text_ids,image_embeds,self_masks)
+            text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks)
 
             self_masks = self_masks.view(bs, 1, -1).repeat(1, self.beam_size, 1).view(search_size, -1)
 
             for i in range(max_len - 1):
                 self_masks[:, i] = 1
                 if i != 0:
-                    text_feats = model.infer(text_ids,image_embeds,self_masks)
+                    text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks)
 
                 mlm_logits = model.rrg_head(text_feats[:, i: i + 1])
 
@@ -339,7 +339,13 @@ class BeamSearch:
                     padded = torch.full((search_size, 1), 1, dtype=torch.long, device=text_ids.device)
 
                     hs = image_embeds.size(-1)
-                    image_embeds = image_embeds.view(bs, 1, -1, hs).repeat(1, self.beam_size, 1, 1).view(search_size, -1, hs)
+                    image_embeds = image_embeds.view(bs, 1, -1, hs).repeat(1, self.beam_size, 1, 1).view(search_size,
+                                                                                                         -1, hs)
+                    if sg_embeds is not None and self.sgade:
+                        sg_embeds = sg_embeds.view(bs, 1, -1, hs).repeat(1, self.beam_size, 1, 1).view(search_size, -1,
+                                                                                                       hs)
+                        sg_masks = sg_masks.view(bs, 1, -1, sg_masks.shape[-1]).repeat(1, self.beam_size, 1, 1).view(
+                            search_size, -1, sg_masks.shape[-1])
                     text_ids[:, i + 1] = tgt_prev_tokens.view(-1)
                     # end_seq = (tgt_prev_tokens == tokenizer.sep_token_id) | (tgt_prev_tokens == tokenizer.pad_token_id)
                     end_seq = tgt_prev_tokens == self.pad_idx
@@ -390,8 +396,7 @@ class BeamSearch:
             #     captions.append(tokenizer.decode(text_id).replace(tokenizer.pad_token, ""))
             # captions = tokenizer.batch_decode(text_ids, skip_special_tokens=True)
         # return {"image_ids": batch["iid"], "captions": captions, "gts": gts}
-        return {'preds':text_ids.cpu()}
-
+        return {'preds': text_ids.cpu()}
 
     # def beam_search_simplified(self, model, init_state, init_logprobs,patch_feats=None,mask=None):
     #

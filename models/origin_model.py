@@ -31,6 +31,8 @@ class RRGModel(nn.Module):
         self.region_cls = config['region_cls']
         self.use_box_feats = config['use_box_feats']
         self.use_sg = config['use_sg']
+        self.sgave = config['sgave']
+        self.sgade = config['sgade']
         self.hidden_size = config['d_model']
         self.d_ff = config['d_ff']
 
@@ -90,9 +92,9 @@ class RRGModel(nn.Module):
         patch_feats, gbl_feats = self.get_img_feats(images)
         return self.encode_img_feats(patch_feats, seq)
 
-    def get_text_feats(self, text_ids, img_feats, self_mask, cross_mask):
+    def get_text_feats(self, text_ids, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None):
         word_embed = self.word_embedding(text_ids)
-        word_embed = self.decoder(word_embed, img_feats, self_mask, cross_mask)
+        word_embed = self.decoder(word_embed, img_feats, self_mask, cross_mask, sg_embeds, sg_masks)
         return word_embed
 
     def extract_img_feats(self, images):
@@ -112,7 +114,7 @@ class RRGModel(nn.Module):
 
     def forward_train(self, batch_dict):
         images, targets = batch_dict['image'], batch_dict['text']
-        region_logits, region_probs, att_logits, att_probs = None, None, None, None
+        region_logits, region_probs, att_logits, att_probs, sg_embeds, sg_masks = None, None, None, None, None, None
         return_dicts = {}
 
         patch_feats, gbl_feats = self.extract_img_feats(images)
@@ -135,12 +137,13 @@ class RRGModel(nn.Module):
         # obtain seq mask, should generated in dataloader
         patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
 
-        if self.use_sg:
+        if self.sgave:
             patch_feats = self.encode_img_feats(patch_feats, att_masks, sg_embeds, sg_masks)
         else:
             patch_feats = self.encode_img_feats(patch_feats, att_masks)
 
-        text_embed, align_attns = self.get_text_feats(seq, patch_feats, self_mask=seq_masks, cross_mask=att_masks)
+        text_embed, align_attns = self.get_text_feats(seq, patch_feats, self_mask=seq_masks, cross_mask=att_masks,
+                                                      sg_embeds=sg_embeds, sg_masks=sg_masks)
         # output, align_attns = self.encoder_decoder(encoded_img_feats, seq, att_masks, seq_mask)
         output = self.rrg_head(text_embed)
 
@@ -161,6 +164,13 @@ class RRGModel(nn.Module):
             boxes, box_labels = batch_dict['boxes'], batch_dict['box_labels']
             region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
 
+            # boxes_temp = boxes[box_masks]
+            # no_box_ids = []
+            # all_ids = torch.unique(boxes_temp[:, 0])
+            # for i in range(patch_feats.shape[0]):
+            #     if i not in all_ids:
+            #         no_box_ids.append(batch_dict['img_id'][i])
+
         if self.att_cls:
             box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
             att_probs = torch.sigmoid(att_logits)
@@ -174,7 +184,8 @@ class RRGModel(nn.Module):
 
         patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
 
-        if self.use_sg:
+        if self.sgave:
+            assert self.use_sg
             patch_feats = self.encode_img_feats(patch_feats, att_masks, sg_embeds, sg_masks)
         else:
             patch_feats = self.encode_img_feats(patch_feats, att_masks)
@@ -183,6 +194,9 @@ class RRGModel(nn.Module):
                              'region_logits': region_logits,
                              'region_probs': region_probs,
                              'att_probs': att_probs,
+                             #'no_box_ids': no_box_ids,
+                             'sg_embeds': sg_embeds if self.sgade else None,
+                             'sg_masks':sg_masks if self.sgade else None,
                              })
 
         return return_dicts
@@ -203,7 +217,7 @@ class RRGModel(nn.Module):
 
         return out, [ys.unsqueeze(0)]
 
-    def infer(self,text_ids, patch_feats,self_masks,cross_masks=None):
+    def infer(self, text_ids, patch_feats, self_masks, cross_masks=None, sg_embeds=None, sg_masks=None):
 
         self_masks = self_masks[:, None, :].expand(patch_feats.size(0), text_ids.size(-1), text_ids.size(-1))
         self_masks = 1.0 - self_masks
@@ -212,7 +226,7 @@ class RRGModel(nn.Module):
             patch_feats.device)  # use add attention instead of filling
         self_masks = self_masks + sub_mask
 
-        out, attns = self.get_text_feats(text_ids, patch_feats, self_masks, cross_masks)
+        out, attns = self.get_text_feats(text_ids, patch_feats, self_masks, cross_masks,sg_embeds,sg_masks)
 
         return out
 

@@ -113,7 +113,7 @@ def config():
     att_cls = False  # attribute classification
     att_cls_w = 0.5
     feature_size = image_size // 32  # 32 is the downsampling rate for the visual extractor
-    output_size = 2
+    output_size = 1
     num_classes = 29  # the number of anatomical locations
     region_select_threshold = 0.5  # the threshold used to select the region after sigmoid
     att_select_threshold = 0.5
@@ -126,6 +126,8 @@ def config():
 
     # scene graph setting
     use_sg = False
+    sgave = False # scene graph aided vision encoder
+    sgade = False # scene graph aided decoder
     num_layers_sgen = 3
     use_region_type_embed = False
     use_focal_ls = False

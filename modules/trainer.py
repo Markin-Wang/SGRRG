@@ -15,7 +15,8 @@ import torch.distributed as dist
 from .utils import clip_grad_norm_, calculate_auc, get_region_mask
 import numpy as np
 from modules.beam_search import BeamSearch
-from modules.loss import AsymmetricLoss,AsymmetricLossOptimized
+from modules.loss import AsymmetricLoss, AsymmetricLossOptimized
+
 
 # from modules.utils import get_grad_norm
 # import torch.distributed as dist
@@ -100,8 +101,9 @@ class BaseTrainer(object):
         self.best_epoch = 0
 
         # keys to cuda
-        self.keys = set(['image','text', 'mask', 'boxes', 'box_labels', 'box_masks', 'region_labels', 'attribute_labels',
-                         'attribute_ids'])
+        self.keys = set(
+            ['image', 'text', 'mask', 'boxes', 'box_labels', 'box_masks', 'region_labels', 'attribute_labels',
+             'attribute_ids'])
 
         if not os.path.exists(self.checkpoint_dir):
             os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -178,8 +180,11 @@ class BaseTrainer(object):
             if self.use_sg:
                 zero_count = self.model.module.scene_graph_encoder.zero_count
                 self.model.module.scene_graph_encoder.zero_count = 0
-                self.logger.info(f'There are {zero_count} samples without any region selected in this epoch.' )
-
+                self.logger.info(f'There are {zero_count} samples without any region selected in this epoch.')
+                self.logger.info(
+                    f'{self.model.module.scene_graph_encoder.zero_att_count / self.model.module.scene_graph_encoder.all_box_count * 100:.2f}% boxes without any attributes predicted.')
+                self.model.module.scene_graph_encoder.zero_att_count = 0
+                self.model.module.scene_graph_encoder.all_box_count = 0
         if dist.get_rank() == self.local_rank:
             self._print_best()
             self._print_best_to_file()
@@ -342,7 +347,7 @@ class Trainer(BaseTrainer):
                 self.optimizer.zero_grad()
                 with autocast(dtype=torch.float16):
                     # region logits is None when att_cls disabled
-                    output = self.model(batch_dict,mode='train')
+                    output = self.model(batch_dict, mode='train')
                     rrg_preds = output['rrg_preds']
                     loss = self.criterion(rrg_preds, batch_dict['text'], batch_dict['mask'])
                     ce_losses.update(loss.item())
@@ -354,7 +359,7 @@ class Trainer(BaseTrainer):
 
                     if self.att_cls:
                         attribute_logits = output['att_logits']
-                        attribute_logits = attribute_logits[attribute_logits!=self.att_pad_idx].unsqueeze(0)
+                        attribute_logits = attribute_logits[attribute_logits != self.att_pad_idx].unsqueeze(0)
                         attribute_cls_loss = self.att_cls_criterion(attribute_logits, batch_dict['attribute_labels'])
                         loss = loss + self.att_cls_w * attribute_cls_loss
                         attribute_cls_losses.update(attribute_cls_loss.item())
@@ -421,7 +426,8 @@ class Trainer(BaseTrainer):
                     #                                      data['text'].to(device, non_blocking=True), \
                     #                                      data['mask'].to(device, non_blocking=True)
                     # total_attn, boxes, return_feats, box_labels = None, None, None, None
-                    batch_dict = {key:data[key].to(device, non_blocking=True) for key in data.keys() if key in self.keys}
+                    batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if
+                                  key in self.keys}
                     if self.region_cls:
                         # boxes, box_labels, region_labels = data['boxes'].to(device, non_blocking=True), \
                         #                                    data['box_labels'].to(device, non_blocking=True), \
@@ -444,9 +450,7 @@ class Trainer(BaseTrainer):
                         #     val_ce_losses.update(loss.item(),rrg_preds.size(0))
                         # # output, _ = self.model(images,reports_ids,mode='sample')
                         # else:
-                        output = self.model(batch_dict,mode='sample')
-
-                        patch_feats = output['encoded_img_feats']
+                        output = self.model(batch_dict, mode='sample')
 
                         if self.region_cls:
                             region_logits = output['region_logits'][region_masks]
@@ -475,9 +479,9 @@ class Trainer(BaseTrainer):
                         #             attribute_preds = attribute_preds.cpu()
                         #             attribute_targets = attribute_targets.cpu()
                         if self.use_new_bs:
-                            output = self.beam_search.caption_test_step(self.model.module, image_embeds=patch_feats)
+                            output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
                         else:
-                            output = self.beam_search.sample(self.model.module, patch_feats=patch_feats)
+                            output = self.beam_search.sample(self.model.module, patch_feats=output['encoded_img_feats'])
 
                     reports = self.tokenizer.decode_batch(output['preds'].numpy())
                     ground_truths = self.tokenizer.decode_batch(batch_dict['text'][:, 1:].cpu().numpy())
@@ -503,9 +507,139 @@ class Trainer(BaseTrainer):
     def test(self):
         self.logger.info('Starting evaluating the best checkpoint in test set.')
         log = {}
-        log.update(self._valid(0,'test'))
+        log.update(self._valid(0, 'test'))
         log = self._synchronize_data(log)
         self.logger.info('The result for the best performed models in test set.')
         for key, value in log.items():
             self.logger.info('\t{:15s}: {}'.format(str(key), value))
 
+    def test_and_save(self, split='test', save_dir='', epoch=0):
+        val_ce_losses = AverageMeter()
+        val_region_cls_losses = AverageMeter()
+        val_att_cls_losses = AverageMeter()
+        log = {}
+        self.model.eval()
+        dataloader = self.val_dataloader if split == 'val' else self.test_dataloader
+        device = self.model.device
+        region_preds, region_targets = [], []
+        val_gts, val_res = [], []
+        img_ids = []
+        no_boxes_ids = []
+
+        with tqdm(desc=f'Epoch %d - {split}' % epoch, unit='it', total=len(dataloader),
+                  disable=dist.get_rank() != self.local_rank) as pbar:
+            with torch.no_grad():
+                for batch_idx, data in enumerate(dataloader):
+                    batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if
+                                  key in self.keys}
+                    batch_dict['img_id'] = data['img_id']
+                    if self.region_cls:
+                        region_labels = batch_dict['region_labels']
+                        region_masks = get_region_mask(region_labels).cpu()
+                        region_labels = region_labels[region_masks]
+
+                    with autocast(dtype=torch.float16):
+                        output = self.model(batch_dict, mode='sample')
+
+                        patch_feats = output['encoded_img_feats']
+
+                        if self.region_cls:
+                            region_logits = output['region_logits'][region_masks]
+                            region_probs = output['region_probs'][region_masks]
+                            no_boxes_ids.extend(output['no_box_ids'])
+                            if len(region_labels) > 0:
+                                val_region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
+                                val_region_cls_losses.update(val_region_cls_loss.item())
+                                if len(region_preds) > 0:
+                                    region_preds = torch.cat((region_preds, region_probs.cpu()), dim=0)
+                                    region_targets = torch.cat((region_targets, region_labels.cpu()), dim=0)
+                                else:
+                                    region_preds = region_probs.cpu()
+                                    region_targets = region_labels.cpu()
+
+                        if self.use_new_bs:
+                            output = self.beam_search.caption_test_step(self.model.module, image_embeds=patch_feats)
+                        else:
+                            output = self.beam_search.sample(self.model.module, patch_feats=patch_feats)
+
+                    reports = self.tokenizer.decode_batch(output['preds'].numpy())
+                    ground_truths = self.tokenizer.decode_batch(batch_dict['text'][:, 1:].cpu().numpy())
+                    val_res.extend(reports)
+                    val_gts.extend(ground_truths)
+                    img_ids.extend(data['img_id'])
+                    memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+
+                    pbar.update()
+                val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},
+                                           {i: [re] for i, re in enumerate(val_res)})
+                log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
+                if split == 'val':
+                    log.update({'val_ce_loss': val_ce_losses.avg})
+                if self.region_cls:
+                    region_auc = calculate_auc(preds=region_preds, targets=region_targets)
+                    log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
+                # if self.att_cls:
+                #     att_auc = calculate_auc(preds=attribute_preds, targets=attribute_targets)
+                #     log.update({f'{split}_att_auc': region_auc, f"{split}_att_loss": val_att_cls_losses.avg})
+        self.logger.info('The result for the best performed models in test set.')
+        for key, value in log.items():
+            self.logger.info('\t{:15s}: {}'.format(str(key), value))
+
+        rank = torch.distributed.get_rank()
+        data = (img_ids, val_res, val_gts)
+        save_data = []
+        save_data.append(log)
+        save_data.append(no_boxes_ids)
+        no_boxes_ids = set(no_boxes_ids)
+        no_boxes_pred, no_boxes_gt, no_box_ids = [], [], []
+
+        with_boxes_pred, with_boxes_gt, with_boxes_ids = [], [], []
+        for i in range(len(img_ids)):
+            if img_ids[i] in no_boxes_ids:
+                no_box_ids.append(img_ids[i])
+                no_boxes_pred.append(val_res[i])
+                no_boxes_gt.append(val_gts[i])
+            else:
+                with_boxes_ids.append(img_ids[i])
+                with_boxes_pred.append(val_res[i])
+                with_boxes_gt.append(val_gts[i])
+
+        val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(no_boxes_gt)},
+                                   {i: [re] for i, re in enumerate(no_boxes_pred)})
+
+        self.logger.info(f'The result for the best performed models in no boxes set ({len(no_box_ids)} samples).')
+        for key, value in val_met.items():
+            self.logger.info('\t{:15s}: {}'.format(str(key), value))
+
+        val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(with_boxes_gt)},
+                                   {i: [re] for i, re in enumerate(with_boxes_pred)})
+
+        self.logger.info(f'The result for the best performed models in with boxes set ({len(with_boxes_ids)} samples).')
+        for key, value in val_met.items():
+            self.logger.info('\t{:15s}: {}'.format(str(key), value))
+
+        # for i in tqdm(range(len(img_ids))):
+        #     img_id, pred, gt = img_ids[i], val_res[i], val_gts[i]
+        #     # Compute score for each metric
+        #     eval_res = self.metric_ftns({0: [gt]}, {0: [pred]})
+        #
+        #     save_data.append({'img_id': img_id, 'pred': pred, 'gt': gt, 'score': eval_res})
+        # with open(f'caption_{rank}.json', 'w') as f:
+        #     json.dump(save_data, f)
+        #
+        # save_path = save_dir
+        # torch.distributed.barrier()
+        # if rank == 0:
+        #     jsons = list()
+        #     paths = list(glob.glob("caption_*.json"))
+        #     for path in paths:
+        #         with open(path, "r") as fp:
+        #             jsons += json.load(fp)
+        #     os.makedirs(save_path, exist_ok=True)
+        #     with open(f"{save_path}/caption_data.json", "w") as fp:
+        #         json.dump(jsons, fp, indent=4)
+        # torch.distributed.barrier()
+        # self.logger.info(f'Save prediction in directory {save_path}.')
+        # os.remove(f"caption_{rank}.json")
+
+        return log

@@ -1,195 +1,159 @@
 import torch
-import argparse
+import spacy
 import numpy as np
 import os
 import random
 from modules.tokenizers_origin import Tokenizer
-from modules.dataloaders import R2DataLoader
+from modules.rule_tokenizer import RuleTokenizer
+from data.dataloaders import R2DataLoader
 from modules.metrics import compute_scores
 from modules.optimizers import build_optimizer, build_lr_scheduler
 from modules.trainer import Trainer
 from modules.loss import compute_loss
-from modules.utils import parse_args, auto_resume_helper, load_checkpoint
+from models.origin_model import RRGModel
+from modules.utils import auto_resume_helper, load_checkpoint
 from modules.logger import create_logger
 import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter
-from config_swin import get_config
-from tqdm import tqdm
-import json
 import torch.backends.cudnn as cudnn
-from models.model import RRGModel
-from copy import deepcopy as dc
+from config import ex
+# from data.multitask_datamodule import MTDataModule
+import resource
+import copy
+
+os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = 'true'
+import time
+# from apex import amp
+import warnings
+
+warnings.filterwarnings("ignore", category=UserWarning)
+import os
+
+import datetime
 
 
-def test(args, config):
-    # parse arguments
-    args, config = parse_args()
-    print(args)
-    # create tokenizer
-    tokenizer = Tokenizer(args)
+def setup(world_size):
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12345"
+    os.environ["RANK"] = "0"
+    os.environ["WORLD_SIZE"] = world_size
 
-    # create data loader
-    train_dataloader = R2DataLoader(args, tokenizer, split='train', shuffle=True)
-    val_dataloader = R2DataLoader(args, tokenizer, split='val', shuffle=False)
-    test_dataloader = R2DataLoader(args, tokenizer, split='test', shuffle=False)
+def scale_lr(config):
+    # linear scale the learning rate according to total batch size, may not be optimal
+    linear_scaled_base = config['lr_base'] * config['batch_size'] * dist.get_world_size() / 64.0
 
-    # build model architecture
-    model = RRGModel(args, tokenizer, logger, config)
-
-
-
-    model.cuda()
-    # if args.amp_opt_level != "O0":
-    #     model, optimizer = amp.initialize(model, optimizer, opt_level=args.amp_opt_level)
-
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK],
-                                                      output_device=config.LOCAL_RANK, broadcast_buffers=False)
-
-    if args.model_path:
-        state_dict = torch.load(args.model_path)['state_dict']
-        logger.info(state_dict.keys())
-        model.load_state_dict(state_dict)
-        logger.info(f'loading pretrained model {args.model_path}, ignoring auto resume')
-    #model_without_ddp = model.module
-
-    metrics = compute_scores
-
-    model = model.cuda()
-
-    model.eval()
-    data = []
-    with torch.no_grad():
-        records = []
-        test_gts, test_res = [], []
-        for batch_idx, (images_id, images, reports_ids, reports_masks, labels) in enumerate(tqdm(test_dataloader)):
-            vis_data = {}
-            vis_data['id'] = images_id
-            vis_data['img'] = images
-            vis_data['labels'] = labels
-            #
-            # print(images_id)
-
-            images, reports_ids, reports_masks, labels = images.cuda(), reports_ids.cuda(), \
-                                                         reports_masks.cuda(), labels.cuda()
-            #if images_id[0] != 'data/mimic_cxr/images/p10/p10402372/s51966612/8797515b-595dfac0-77013a06-226b52bd-65681bf2.jpg':
-            #    continue
-            #print('000', reports_ids, reports_ids.shape)
-            output, attns = model(images, labels=labels, mode='sample')
-            if args.addcls:
-                _, logits, cams, fore_map, total_attns, idxs, align_attns_train =  model(images, reports_ids, labels, mode='train')
-                vis_data['cams'] = cams.detach().cpu()
-                vis_data['logits'] = logits.detach().cpu()
-                if fore_map is not None:
-                    vis_data['fore_map'] = fore_map.detach().cpu()
-                if total_attns is not None:
-                    vis_data['total_attns'] = total_attns
-                if align_attns_train is not None:
-                    vis_data['align_attns_train'] = align_attns_train
-            else:
-                idxs = None
+    # linear_scaled_crosslr = config['cross_base_lr'] * config['per_gpu_batchsize'] * dist.get_world_size() / 64.0
+    linear_scaled_warmup_lr = linear_scaled_base / config['warmup_ratio']
+    linear_scaled_min_lr = linear_scaled_warmup_lr
+    # gradient accumulation also need to scale the learning rate
+    config['lr_base'] = linear_scaled_base
+    config['warmup_lr'] = linear_scaled_warmup_lr
+    config['min_lr'] = linear_scaled_min_lr
 
 
-            vis_data['attn'] = attns
+@ex.automain
+def main(_config):
+    _config = copy.deepcopy(_config)
+    world_size = _config["n_gpu"]
+    # setup(str(_config["n_gpu"]))
 
+    torch.cuda.set_device(_config['local_rank'])
+    torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=world_size)
+    rank = dist.get_rank()
+    device_id = rank % torch.cuda.device_count()
+    # torch.distributed.barrier()
 
-
-
-            # if args.n_gpu > 1:
-            #     reports = model.module.tokenizer.decode_batch(output.cpu().numpy())
-            #     ground_truths = model.module.tokenizer.decode_batch(reports_ids[:, 1:].cpu().numpy())
-            # else:
-            #     reports = model.tokenizer.decode_batch(output.cpu().numpy())
-            #     ground_truths = model.tokenizer.decode_batch(reports_ids[:, 1:].cpu().numpy())
-
-            vis_data['pre'] = []
-            vis_data['gt'] = []
-            vis_data['met'] = []
-            vis_data['train_pre'] = []
-            if idxs is not None:
-                vis_data['idxs'] = idxs
-            # print(reports_ids[0].shape, len(ground_truths[0]))
-
-
-            for id, out, report_id in zip(images_id, output, reports_ids):
-                predict = tokenizer.decode(out.cpu().numpy())
-                gt = tokenizer.decode(report_id[1:].cpu().numpy())
-                val_met = metrics({id: [gt]}, {id: [predict]})
-                # vis_data['pre'].append(out.cpu().numpy())
-                # vis_data['gt'].append(report_id[1:].cpu().numpy())
-                vis_data['pre'].append(predict)
-                vis_data['gt'].append(gt)
-                # if val_met['BLEU_4'] > 0.3:
-                #     records.append({'id':id,'gt':gt,'pre':predict})
-                vis_data['met'].append(val_met)
-            data.append(vis_data)
-
-            reports = tokenizer.decode_batch(output.cpu().numpy())
-            ground_truths = tokenizer.decode_batch(reports_ids[:, 1:].cpu().numpy())
-            test_res.extend(reports)
-            test_gts.extend(ground_truths)
-        #vis_data['records'] = records
-        test_met = metrics({i: [gt] for i, gt in enumerate(test_gts)},
-                                   {i: [re] for i, re in enumerate(test_res)})
-
-    print(test_met)
-
-    # f = open('mimic_prediction_our03.json', 'w', encoding='utf-8')
-    # json.dump(records, f, indent=1)
-    # f.close()
-    data = cat_data(data)
-    torch.save(data, os.path.join('mic_sts_st_2e-6_9e-5_1e2_wd5e-2_4_bs192_3gpu_ep40_et.pth'))
-    #torch.save([tokenizer.idx2token, tokenizer.token2idx], os.path.join('visualizations','vis', args.dataset_name+'token_map.pth'))
-
-
-def cat_data(data):
-    temp = dc(data[0])
-    for i in range(1,len(data)):
-        temp['id'].extend(data[i]['id'])
-        temp['img'] = torch.cat((temp['img'], data[i]['img']))
-        temp['labels'] = torch.cat((temp['labels'], data[i]['labels']))
-        temp['pre'].extend(data[i]['pre'])
-        temp['train_pre'].extend(data[i]['train_pre'])
-        temp['attn'].extend(data[i]['attn'])
-        temp['gt'].extend(data[i]['gt'])
-        temp['met'].extend(data[i]['met'])
-        saved_data = [{'id': temp['id'][i], 'label': temp['labels'][i], 'pre': temp['pre'][i], 'gt': temp['gt'][i],
-                       'met': temp['met'][i]}
-                      for i in range(len(temp['id']))]
-    return saved_data
-
-
-
-
-if __name__ == '__main__':
-    args, config = parse_args()
-
-    if 'RANK' in os.environ:
-        rank = int(os.environ["RANK"])
-    else:
-        rank = -1
-
-    if 'WORLD_SIZE' in os.environ:
-        world_size = int(os.environ['WORLD_SIZE'])
-    else:
-        world_size = -1
-
-    ngpus_per_node = torch.cuda.device_count()
-
-    if config.LOCAL_RANK != -1:  # for torch.distributed.launch
-        args.local_rank = config.LOCAL_RANK
-        args.rank = config.LOCAL_RANK
-
-    torch.cuda.set_device(config.LOCAL_RANK)
-    torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
-    torch.distributed.barrier()
-
-    seed = config.SEED + dist.get_rank()
+    seed = _config['seed'] + dist.get_rank()
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
     cudnn.benchmark = False
+    save_dir = os.path.join(_config['output'], _config['dataset_name'], _config['exp_name'])
+    os.makedirs(save_dir, exist_ok=True)
+    logger = create_logger(output_dir=save_dir, dist_rank=_config['local_rank'], name=_config['exp_name'])
 
-    logger = create_logger(output_dir=config.OUTPUT, dist_rank=config.LOCAL_RANK, name=f"{config.MODEL.NAME}")
-    # print config
-    test(args, config)
+    writer = SummaryWriter(log_dir=os.path.join(_config['output'], _config['dataset_name'], _config['exp_name']))
+    # create tokenizer
+
+    # create data loader
+    train_dataloader = R2DataLoader(_config, None, split='train', shuffle=True)
+    tokenizer = train_dataloader.dataset.tokenizer  # remember to delete the old vocab when new one
+    _config['vocab_size'] = tokenizer.get_vocab_size()
+
+    val_dataloader = R2DataLoader(_config, tokenizer, split='val', shuffle=False)
+    test_dataloader = R2DataLoader(_config, tokenizer, split='test', shuffle=False)
+
+
+    dm = {'train_dataloader': train_dataloader, 'val_dataloader': val_dataloader, 'test_dataloader': test_dataloader,
+          'tokenizer': tokenizer}
+    # dm = MTDataModule(_config, dist=True)
+
+    # build model architecture
+    model = RRGModel(tokenizer, logger, _config)
+
+    if _config['scale_lr']:
+        scale_lr(_config)
+
+    optimizer = build_optimizer(model, _config)
+
+    logger.info(model)
+
+    resume = False
+
+    model = RRGModel(tokenizer, logger, _config)
+    state_dict = torch.load(_config['load_path'])['state_dict']
+    model.load_state_dict(state_dict)
+    model = model.to(device_id)
+
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id], broadcast_buffers=False,
+                                                      find_unused_parameters=True)
+    model_without_ddp = model.module
+
+    if _config['compile']:
+        model = torch.compile(model)
+
+    # print(model)
+
+    lr_scheduler = build_lr_scheduler(_config, optimizer, len(train_dataloader))
+
+    if dist.get_rank() == _config['local_rank']:
+        logger.info(_config)
+        logger.info(f"RANK and WORLD_SIZE in environ: {rank}/{world_size}")
+        # path = os.path.join(save_dir, _config['exp_name'], "config.json")
+        # with open(path, "w") as f:
+        #     f.write(_config.dump())
+        # logger.info(f"Full config saved to {path}")
+        # logger.info(_config.dump())
+        n_parameters = sum(p.numel() for p in model_without_ddp.parameters() if p.requires_grad)
+        logger.info(f"number of params: {n_parameters}")
+        if hasattr(model_without_ddp, 'flops'):
+            flops = model_without_ddp.flops()
+            logger.info(f"number of GFLOPs: {flops / 1e9}")
+
+
+    # get function handles of loss and metrics
+    criterion = compute_loss
+    metrics = compute_scores
+
+    # build optimizer, learning rate scheduler
+
+    # build trainer and start to train
+    trainer = Trainer(model, criterion, metrics, optimizer, lr_scheduler, dm, writer, logger, _config)
+    save_dir = os.path.join(*_config['load_path'].split('/')[:-1])
+    trainer.test_and_save(split='test',save_dir=save_dir)
+
+    # if _config["test_after"]:
+    #
+    #     # if args.amp_opt_level != "O0":
+    #     #     model, optimizer = amp.initialize(model, optimizer, opt_level=args.amp_opt_level)
+    #
+    #     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id], broadcast_buffers=False,
+    #                                                       find_unused_parameters=_config['debug'])
+    #     logger.info(f'loading model weights from {load_path}.')
+    #     trainer = Trainer(model, criterion, metrics, optimizer, lr_scheduler, dm, writer, logger, _config)
+    #     trainer.test()
+    writer.close()
+
+
+

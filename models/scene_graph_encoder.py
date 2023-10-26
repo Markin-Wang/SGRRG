@@ -99,7 +99,6 @@ class SceneGraphEncoder(nn.Module):
             att_count = att_labels.sum(-1)
             self.zero_att_count += (att_count == 0).sum()
             self.all_box_count += att_count.shape[0]
-            print(f'{self.zero_att_count/self.all_box_count*100:.2f}% boxes without any attributes predicted.')
             att_ids = self._prepare_att_multi(att_labels, box_labels)
 
         att_masks = torch.zeros((box_feats.shape[0], att_ids.shape[-1])).to(box_feats.device)
@@ -182,7 +181,7 @@ class SceneGraphEncoder(nn.Module):
         for i in range(batch_size):
             if len(reformed_node_list[i]) == 0:
                 self.zero_count += 1
-                print(f'{self.zero_count} samples without any regions.')
+                # print(f'{self.zero_count} samples without any regions.')
                 #print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
                 # print(reformed_node_list[i],reformed_node_embeds[i, :len(reformed_node_list[i])],reformed_node_masks[i, :len(reformed_node_list[i])])
             else:

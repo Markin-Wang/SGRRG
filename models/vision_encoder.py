@@ -36,8 +36,10 @@ class VisionEncoder(nn.Module):
         self.drop_prob_lm = config['drop_prob_lm']
 
         self.use_sg = config['use_sg']
+        self.sgave = config['sgave']
 
-        if self.use_sg:
+        if self.sgave:
+            assert self.use_sg
             self.layers = clones(SceneGraphAidedEncoderLayer(config), self.num_layers)
         else:
             self.layers = clones(EncoderLayer(config), self.num_layers)

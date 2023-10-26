@@ -15,6 +15,7 @@ from math import inf
 from timm.models.layers import trunc_normal_, to_2tuple
 from modules.utils import load_embedding_layer, init_weights
 
+
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
@@ -32,15 +33,20 @@ class Decoder(nn.Module):
 
         self.input_encoding_size = config['d_model']
         self.drop_prob_lm = config['drop_prob_lm']
+        self.use_sg = config['use_sg']
+        self.sgade = config['sgade']
 
-
-        self.layers = clones(DecoderLayer(config), self.num_layers)
+        if self.sgade:
+            assert self.use_sg
+            self.layers = clones(SceneGraphAidedDecoderLayer(config), self.num_layers)
+        else:
+            self.layers = clones(DecoderLayer(config), self.num_layers)
         self.norm = nn.LayerNorm(self.d_model)
 
-    def forward(self, x, img_feats, self_mask, cross_mask):
+    def forward(self, x, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None):
         attns = []
         for layer in self.layers:
-            x, attn = layer(x, img_feats, self_mask, cross_mask)
+            x, attn = layer(x, img_feats, self_mask, cross_mask, sg_embeds, sg_masks)
             attns.append(attn)
         return self.norm(x), attns
 
@@ -60,10 +66,36 @@ class DecoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 3)
 
-    def forward(self, x, img_feats, self_mask, cross_mask):
+    def forward(self, x, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
         x = self.sublayer[1](x, lambda x: self.cross_attn(x, img_feats, img_feats, cross_mask))
         return self.sublayer[2](x, self.feed_forward), self.cross_attn.attn
+
+
+class SceneGraphAidedDecoderLayer(nn.Module):
+    def __init__(self, config):
+        super(SceneGraphAidedDecoderLayer, self).__init__()
+
+        self.d_model = config['d_model']
+        self.num_heads = config['num_heads']
+        self.pe = config['pe']
+        self.d_ff = config['d_ff']
+        self.dropout = config['dropout']
+
+        self.self_attn = MultiHeadedAttention(self.num_heads, self.d_model)
+        self.cross_attn_img = MultiHeadedAttention(self.num_heads, self.d_model)
+        self.cross_attn_sg = MultiHeadedAttention(self.num_heads, self.d_model)
+        self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
+        self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 4)
+
+    def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks):
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
+        x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
+        selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
+        x[selected_bs] = self.sublayer[2](x[selected_bs], lambda x: self.cross_attn_sg(x, sg_embeds[selected_bs],
+                                                                          sg_embeds[selected_bs],
+                                                                          sg_masks[selected_bs]))
+        return self.sublayer[3](x, self.feed_forward), self.cross_attn_img.attn
 
 
 class MultiHeadedAttention(nn.Module):
