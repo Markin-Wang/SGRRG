@@ -125,7 +125,7 @@ class AsymmetricLossOptimized(nn.Module):
             if self.disable_torch_grad_focal_loss:
                 torch.set_grad_enabled(True)
             self.loss *= self.asymmetric_w
-        self.loss = self.loss.sum(dim=-1)
+
         if self.reduction == 'mean':
             return -self.loss.mean()
 
@@ -175,7 +175,6 @@ class ASLSingleLabel(nn.Module):
         loss = loss.sum(dim=-1)
         if self.reduction == 'mean':
             loss = loss.mean()
-
         return loss
 
 
