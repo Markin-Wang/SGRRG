@@ -2,7 +2,7 @@ import torch.nn as nn
 import copy
 from modules.standard_trans import PositionwiseFeedForward, SublayerConnection
 from modules.utils import init_weights
-from config import cgnome_catid2attrange as catid2attrange
+from config import cgnome_catid2attrange as catid2attrange, cgnome_id2cat as id2cat, cgnome_cumcat
 import numpy as np
 import torch
 import math
@@ -31,6 +31,7 @@ class SceneGraphEncoder(nn.Module):
         self.zero_count = 0
         self.zero_att_count = 0
         self.all_box_count = 0
+        self.max_att = max(id2cat)
 
         if self.use_region_type_embed:
             self.token_type_embeddings = nn.Embedding(self.num_classes + 1, self.hidden_size)
@@ -60,9 +61,13 @@ class SceneGraphEncoder(nn.Module):
         self.sg_encoder = SGEncoder(config)
         self.sg_encoder.apply(init_weights)
 
-        attribute_masks = torch.full((self.num_classes, self.num_attributes), False)
+        # attribute_masks = torch.full((self.num_classes, self.num_attributes), False)
+        # for i in range(attribute_masks.shape[0]):
+        #     attribute_masks[i, self.catid2attrange[i][0]:self.catid2attrange[i][1] + 1] = True
+
+        attribute_masks = torch.full((self.num_classes, self.max_att),False)
         for i in range(attribute_masks.shape[0]):
-            attribute_masks[i, self.catid2attrange[i][0]:self.catid2attrange[i][1] + 1] = True
+            attribute_masks[i, :id2cat[i]] = True
 
         self.register_buffer(
             "attribute_masks", attribute_masks, persistent=False
@@ -70,17 +75,31 @@ class SceneGraphEncoder(nn.Module):
 
 
     def forward(self, boxes, box_feats, box_labels, batch_size, att_ids=None, att_probs=None):
+        # for one head
+        # if att_ids is None:
+        #     # for inference, generate the att_ids from the att_probs
+        #     assert att_probs is not None
+        #     att_labels = att_probs > self.att_select_threshold
+        #     att_masks = self.attribute_masks[box_labels]
+        #     att_labels = att_labels & att_masks
+        #     att_count = att_labels.sum(-1)
+        #     self.zero_att_count += (att_count == 0).sum()
+        #     self.all_box_count += att_count.shape[0]
+        #     print(f'{self.zero_att_count/self.all_box_count*100:.2f}% boxes without any attributes predicted.')
+        #     att_ids = self._prepare_att(att_labels)
+
+        # for multi-head
         if att_ids is None:
             # for inference, generate the att_ids from the att_probs
             assert att_probs is not None
             att_labels = att_probs > self.att_select_threshold
-            att_masks = self.attribute_masks[box_labels]
-            att_labels = att_labels & att_masks
+            # att_masks = self.attribute_masks[box_labels]
+            # att_labels = att_labels & att_masks
             att_count = att_labels.sum(-1)
             self.zero_att_count += (att_count == 0).sum()
             self.all_box_count += att_count.shape[0]
             print(f'{self.zero_att_count/self.all_box_count*100:.2f}% boxes without any attributes predicted.')
-            att_ids = self._prepare_att(att_labels)
+            att_ids = self._prepare_att_multi(att_labels, box_labels)
 
         att_masks = torch.zeros((box_feats.shape[0], att_ids.shape[-1])).to(box_feats.device)
         att_masks[att_ids == self.att_pad_idx] = torch.finfo(box_feats.dtype).min
@@ -124,9 +143,22 @@ class SceneGraphEncoder(nn.Module):
     def _prepare_att(self, att_labels):
         max_len = max(torch.sum(att_labels, dim=1))
         bs = att_labels.shape[0]
-        att_ids = torch.full((bs, max_len), self.att_pad_idx, device=att_labels.device)
+        att_ids = torch.full((bs, max_len), self.att_pad_idx, device=att_labels.device,dtype=toch.long)
         for i in range(att_labels.shape[0]):
             idx = torch.nonzero(att_labels[i]).flatten()
+            att_ids[i, :len(idx)] = idx
+
+        return att_ids
+
+    def _prepare_att_multi(self, att_labels, box_labels):
+        # note in inferece, the att_id is per head from 0 to x, mapping is needed to ensure consistency
+        max_len = max(torch.sum(att_labels, dim=1))
+        bs = att_labels.shape[0]
+        att_ids = torch.full((bs, max_len), self.att_pad_idx, device=att_labels.device, dtype=toch.long)
+        for i in range(att_labels.shape[0]):
+            box_label = box_labels[i].item()
+            # add cumulative index shift
+            idx = torch.nonzero(att_labels[i]).flatten() + cgnome_cumcat[box_label]
             att_ids[i, :len(idx)] = idx
 
         return att_ids
