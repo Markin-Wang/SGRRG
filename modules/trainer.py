@@ -47,6 +47,7 @@ class BaseTrainer(object):
         self.test_after = config['test_after']
         self.early_stop = config['early_stop']
         self.local_rank = config['local_rank']
+        self.att_pad_idx = config['att_pad_idx']
         # if args.debug:
         #     for submodule in model.modules():
         #         submodule.register_forward_hook(nan_hook)
@@ -354,6 +355,7 @@ class Trainer(BaseTrainer):
 
                     if self.att_cls:
                         attribute_logits = output['att_logits']
+                        attribute_logits = attribute_logits[attribute_logits!=self.att_pad_idx].unsqueeze(0)
                         attribute_cls_loss = self.att_cls_criterion(attribute_logits, batch_dict['attribute_labels'])
                         loss = loss + self.att_cls_w * attribute_cls_loss
                         attribute_cls_losses.update(attribute_cls_loss.item())

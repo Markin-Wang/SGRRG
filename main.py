@@ -115,8 +115,10 @@ def main(_config):
     # if args.amp_opt_level != "O0":
     #     model, optimizer = amp.initialize(model, optimizer, opt_level=args.amp_opt_level)
 
+    # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id], broadcast_buffers=False,
+    #                                                   find_unused_parameters=_config['debug'])
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id], broadcast_buffers=False,
-                                                      find_unused_parameters=_config['debug'])
+                                                      find_unused_parameters=True)
     model_without_ddp = model.module
 
     if _config['compile']:

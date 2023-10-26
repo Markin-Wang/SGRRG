@@ -2,7 +2,7 @@ import torch.nn as nn
 import copy
 from modules.standard_trans import PositionwiseFeedForward, SublayerConnection
 from modules.utils import init_weights
-from config import catid2attrange
+from config import cgnome_catid2attrange as catid2attrange
 import numpy as np
 import torch
 import math
@@ -29,6 +29,8 @@ class SceneGraphEncoder(nn.Module):
         self.use_region_type_embed = config['use_region_type_embed']
         self.encode_type = config['encode_type']
         self.zero_count = 0
+        self.zero_att_count = 0
+        self.all_box_count = 0
 
         if self.use_region_type_embed:
             self.token_type_embeddings = nn.Embedding(self.num_classes + 1, self.hidden_size)
@@ -40,8 +42,8 @@ class SceneGraphEncoder(nn.Module):
         self.proj = nn.Linear(self.feature_size, self.hidden_size)
         self.proj.apply(init_weights)
 
-        self.pre_dropout = nn.Dropout(p=self.drop_prob_lm)
-        self.pre_dropout.apply(init_weights)
+        # self.pre_dropout = nn.Dropout(p=self.drop_prob_lm)
+        # self.pre_dropout.apply(init_weights)
 
         self.att_embedding = nn.Embedding(self.num_attributes + 1, self.hidden_size,
                                           padding_idx=self.num_attributes)  # the last one is for the mask
@@ -60,7 +62,7 @@ class SceneGraphEncoder(nn.Module):
 
         attribute_masks = torch.full((self.num_classes, self.num_attributes), False)
         for i in range(attribute_masks.shape[0]):
-            attribute_masks[i][self.catid2attrange[i][0]:self.catid2attrange[i][1] + 1] = True
+            attribute_masks[i, self.catid2attrange[i][0]:self.catid2attrange[i][1] + 1] = True
 
         self.register_buffer(
             "attribute_masks", attribute_masks, persistent=False
@@ -74,6 +76,10 @@ class SceneGraphEncoder(nn.Module):
             att_labels = att_probs > self.att_select_threshold
             att_masks = self.attribute_masks[box_labels]
             att_labels = att_labels & att_masks
+            att_count = att_labels.sum(-1)
+            self.zero_att_count += (att_count == 0).sum()
+            self.all_box_count += att_count.shape[0]
+            print(f'{self.zero_att_count/self.all_box_count*100:.2f}% boxes without any attributes predicted.')
             att_ids = self._prepare_att(att_labels)
 
         att_masks = torch.zeros((box_feats.shape[0], att_ids.shape[-1])).to(box_feats.device)
@@ -90,12 +96,12 @@ class SceneGraphEncoder(nn.Module):
 
         att_embed = self.att_embedding(att_ids) + self.token_type_embeddings(att_type)
         # att_embed = self.pre_dropout(self.att_norm(att_embed))
-        att_embed = self.pre_dropout(att_embed)
+        # att_embed = self.pre_dropout(att_embed)
 
         obj_embeds = self.proj(box_feats) + self.token_type_embeddings(obj_type)
         #obj_embeds = self.obj_norm(obj_embeds)
         obj_embeds = obj_embeds.unsqueeze(1)
-        obj_masks = torch.full((obj_embeds.shape[0], 1), 0, device=obj_embeds.device)
+        obj_masks = torch.full((obj_embeds.shape[0], 1), 0.0, device=obj_embeds.device)
 
         if self.encode_type == 'oa-c':
             node_embeds = torch.cat((obj_embeds, att_embed), dim=1)
@@ -143,10 +149,12 @@ class SceneGraphEncoder(nn.Module):
         for i in range(batch_size):
             if len(reformed_node_list[i]) == 0:
                 self.zero_count += 1
-                # print(f'{self.zero_count} samples without any regions.')
+                print(f'{self.zero_count} samples without any regions.')
                 #print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
-            reformed_node_embeds[i, :len(reformed_node_list[i])] = reformed_node_list[i]
-            reformed_node_masks[i, :len(reformed_node_list[i])] = 0.0
+                # print(reformed_node_list[i],reformed_node_embeds[i, :len(reformed_node_list[i])],reformed_node_masks[i, :len(reformed_node_list[i])])
+            else:
+                reformed_node_embeds[i, :len(reformed_node_list[i])] = reformed_node_list[i]
+                reformed_node_masks[i, :len(reformed_node_list[i])] = 0.0
 
         return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
 
