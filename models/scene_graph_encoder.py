@@ -43,8 +43,10 @@ class SceneGraphEncoder(nn.Module):
         self.proj = nn.Linear(self.feature_size, self.hidden_size)
         self.proj.apply(init_weights)
 
-        # self.pre_dropout = nn.Dropout(p=self.drop_prob_lm)
-        # self.pre_dropout.apply(init_weights)
+        self.att_norm = nn.LayerNorm(self.hidden_size)
+        self.att_norm.apply(init_weights)
+        self.pre_dropout = nn.Dropout(p=self.drop_prob_lm)
+        self.pre_dropout.apply(init_weights)
 
         self.att_embedding = nn.Embedding(self.num_attributes + 1, self.hidden_size,
                                           padding_idx=self.num_attributes)  # the last one is for the mask
@@ -55,8 +57,7 @@ class SceneGraphEncoder(nn.Module):
 
         #self.obj_norm = nn.BatchNorm1d(self.hidden_size)
 
-        # self.att_norm = nn.LayerNorm(self.hidden_size)
-        # self.att_norm.apply(init_weights)
+
 
         self.sg_encoder = SGEncoder(config)
         self.sg_encoder.apply(init_weights)
@@ -114,7 +115,7 @@ class SceneGraphEncoder(nn.Module):
             obj_type = torch.full_like(box_labels, 0, dtype=torch.long)
 
         att_embed = self.att_embedding(att_ids) + self.token_type_embeddings(att_type)
-        # att_embed = self.pre_dropout(self.att_norm(att_embed))
+        att_embed = self.pre_dropout(self.att_norm(att_embed))
         # att_embed = self.pre_dropout(att_embed)
 
         obj_embeds = self.proj(box_feats) + self.token_type_embeddings(obj_type)
@@ -154,7 +155,7 @@ class SceneGraphEncoder(nn.Module):
         # note in inferece, the att_id is per head from 0 to x, mapping is needed to ensure consistency
         max_len = max(torch.sum(att_labels, dim=1))
         bs = att_labels.shape[0]
-        att_ids = torch.full((bs, max_len), self.att_pad_idx, device=att_labels.device, dtype=toch.long)
+        att_ids = torch.full((bs, max_len), self.att_pad_idx, device=att_labels.device, dtype=torch.long)
         for i in range(att_labels.shape[0]):
             box_label = box_labels[i].item()
             # add cumulative index shift
