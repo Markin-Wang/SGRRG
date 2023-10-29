@@ -157,6 +157,9 @@ class R2DataLoader(DataLoader):
         if 'attribute_labels' in batch[0].keys():
             keys.extend(['attribute_labels'])
 
+        if 'attribute_label_dicts' in batch[0].keys():
+            keys.extend(['attribute_label_dicts'])
+
         batch_dict = {key: [sample[key] for sample in batch] for key in keys}
 
         reports_ids, reports_masks, seq_lengths, = batch_dict['text'], batch_dict['mask'], batch_dict['seq_length']
@@ -231,6 +234,24 @@ class R2DataLoader(DataLoader):
             else:
                 batch_dict['attribute_labels'] = []
             batch_dict['attribute_masks'] = torch.cat(attribute_masks, dim=0)
+
+        if 'attribute_label_dicts' in batch[0].keys():
+            attribute_labels = []
+            selected_box_labels = batch_dict['box_labels'][batch_dict['box_masks']]
+            selected_boxes_bsid = batch_dict['boxes'][batch_dict['box_masks'], 0]
+            for i, attribute_label in enumerate(batch_dict['attribute_label_dicts']):
+                i_box_labels = selected_box_labels[selected_boxes_bsid == i]
+                cur_attribute_labels = {}
+                for box_label in i_box_labels:
+                    temp_label = attribute_label[box_label.item()]
+                    # attribute_ids.append(temp_label)
+                    # attribute_label_ = torch.zeros(1,849) # 849 attributes
+                    attribute_label_ = torch.zeros(1, cgnome_id2cat[box_label.item()])
+                    attribute_label_[0, temp_label] = 1.0
+                    cur_attribute_labels[box_label.item()] = attribute_label_
+                attribute_labels.append(cur_attribute_labels)
+                # batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=0)
+            batch_dict['attribute_label_dicts'] = attribute_labels
 
         return batch_dict
 

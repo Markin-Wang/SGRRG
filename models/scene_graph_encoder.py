@@ -126,10 +126,10 @@ class SceneGraphEncoder(nn.Module):
             node_embeds = torch.cat((obj_embeds, att_embed), dim=1)
             node_masks = torch.cat((obj_masks, att_masks), dim=1).unsqueeze(1)  # [bs,1,L]
             sg_embeds = self.sg_encoder(node_embeds, node_masks)
-        elif self.encode_type == 'oa-d':
+        elif self.encode_type.startswith('oa-d'):
             node_embeds = torch.cat((obj_embeds, att_embed), dim=1)
             node_masks = torch.cat((obj_masks, att_masks), dim=1).unsqueeze(1)  # [bs,1,L]
-            sg_embeds = self.sg_encoder(obj_embeds, obj_masks,node_embeds,node_masks)
+            sg_embeds = self.sg_encoder(node_embeds,node_masks,boxes[:,0])
         elif self.encode_type== 'oa-dc':
             sg_embeds = self.sg_encoder(obj_embeds,obj_masks,att_embed,att_masks)
         else:
@@ -190,6 +190,7 @@ class SceneGraphEncoder(nn.Module):
 
         return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
 
+
 class SGEncoder(nn.Module):
     def __init__(self, config):
         super(SGEncoder, self).__init__()
@@ -218,11 +219,11 @@ class SGEncoder(nn.Module):
 
         self.ape = None
 
-    def forward(self, x, mask, sg_embeds=None,sg_masks=None):
+    def forward(self, x, self_masks, bs_ids=None):
         if self.ape is not None:
             x = x + self.ape
         for layer in self.layers:
-            x, attn = layer(x, mask,sg_embeds, sg_masks)
+            x, attn = layer(x, self_masks,bs_ids)
         return self.norm(x)
 
 class SGOADEncoderLayer(nn.Module):
@@ -239,10 +240,29 @@ class SGOADEncoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 3)
 
-    def forward(self, x, self_mask, sg_embed, cross_mask):
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
-        x = self.sublayer[1](x, lambda x: self.cross_attn(x, sg_embed, sg_embed, cross_mask))
+    def forward(self, x, self_masks, bs_ids):
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_masks))
+        obj_embeds = x[:,0]
+        obj_embeds, obj_masks, _ = self._to_bs_format_obj(bs_ids,obj_embeds)
+        obj_embeds = self.sublayer[1](obj_embeds, lambda x: self.cross_attn(x, x, x, obj_masks))
+        # since the boxes are put in batch size order, and we process in sequence, so actually no restore idx is needed
+        x[:,0] = obj_embeds[obj_masks.squeeze(1)==0]
         return self.sublayer[2](x, self.feed_forward), self.cross_attn.attn
+
+    def _to_bs_format_obj(self, bs_ids, obj_embeds):
+        total_ids = torch.unique(bs_ids)
+        restore_idx = []
+        max_len = max([(bs_ids == bs_id).sum() for bs_id in total_ids])
+        padded_obj_embeds = torch.zeros(len(total_ids), max_len, obj_embeds.shape[-1], device=obj_embeds.device)
+        masks = torch.full((len(total_ids), max_len), torch.finfo(obj_embeds.dtype).min,device=obj_embeds.device)
+        for i,bs_id in enumerate(total_ids):
+            select_ids = bs_ids == bs_id
+            cur_len = select_ids.sum()
+            restore_idx.extend(torch.nonzero(select_ids).flatten())
+            padded_obj_embeds[i,:cur_len] = obj_embeds[select_ids]
+            masks[i,:cur_len] =  0.0
+
+        return padded_obj_embeds, masks.unsqueeze(1), restore_idx
 
 
 class SGOACEncoderLayer(nn.Module):
@@ -258,7 +278,7 @@ class SGOACEncoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 2)
 
-    def forward(self, x, mask, sg_embeds=None, sg_masks=None):
+    def forward(self, x, mask, bs_ids=None):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
         return self.sublayer[1](x, self.feed_forward), self.self_attn.attn
 
@@ -317,4 +337,3 @@ class MultiHeadedAttention(nn.Module):
 
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
         return self.linears[-1](x)
-

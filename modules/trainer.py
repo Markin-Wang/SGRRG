@@ -16,6 +16,8 @@ from .utils import clip_grad_norm_, calculate_auc, get_region_mask
 import numpy as np
 from modules.beam_search import BeamSearch
 from modules.loss import AsymmetricLoss, AsymmetricLossOptimized
+from collections import defaultdict
+from config import cgnome_id2cat, categories
 
 
 # from modules.utils import get_grad_norm
@@ -181,8 +183,9 @@ class BaseTrainer(object):
                 zero_count = self.model.module.scene_graph_encoder.zero_count
                 self.model.module.scene_graph_encoder.zero_count = 0
                 self.logger.info(f'There are {zero_count} samples without any region selected in this epoch.')
+                # add 1 avoid divide zero
                 self.logger.info(
-                    f'{self.model.module.scene_graph_encoder.zero_att_count / (self.model.module.scene_graph_encoder.all_box_count+1) * 100:.2f}% boxes without any attributes predicted.')
+                    f'{self.model.module.scene_graph_encoder.zero_att_count / (self.model.module.scene_graph_encoder.all_box_count + 1) * 100:.2f}% boxes without any attributes predicted.')
                 self.model.module.scene_graph_encoder.zero_att_count = 0
                 self.model.module.scene_graph_encoder.all_box_count = 0
         if dist.get_rank() == self.local_rank:
@@ -332,18 +335,6 @@ class Trainer(BaseTrainer):
             for batch_idx, data in enumerate(self.train_dataloader):
                 batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if key in self.keys}
 
-                # images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
-                #                                      data['text'].to(device, non_blocking=True), \
-                #                                      data['mask'].to(device, non_blocking=True)
-                # boxes, box_labels, region_labels, box_masks = None, None, None, None
-                # if self.region_cls:
-                #     boxes, box_labels, box_masks, region_labels = data['boxes'].to(device, non_blocking=True), \
-                #                                                   data['box_labels'].to(device, non_blocking=True), \
-                #                                                   data['box_masks'].to(device, non_blocking=True), \
-                #                                                   data['region_labels'].to(device, non_blocking=True)
-                #     if self.att_cls:
-                #         attribute_labels = data['attribute_labels'].to(device, non_blocking=True)
-
                 self.optimizer.zero_grad()
                 with autocast(dtype=torch.float16):
                     # region logits is None when att_cls disabled
@@ -416,16 +407,13 @@ class Trainer(BaseTrainer):
         device = self.model.device
         region_preds, region_targets = [], []
         # attribute_preds, attribute_targets = [], []
+        attribute_preds, attribute_targets = defaultdict(list), defaultdict(list)
 
         with tqdm(desc=f'Epoch %d - {split}' % epoch, unit='it', total=len(dataloader),
                   disable=dist.get_rank() != self.local_rank) as pbar:
             with torch.no_grad():
                 val_gts, val_res = [], []
                 for batch_idx, data in enumerate(dataloader):
-                    # images, reports_ids, reports_masks = data['image'].to(device, non_blocking=True), \
-                    #                                      data['text'].to(device, non_blocking=True), \
-                    #                                      data['mask'].to(device, non_blocking=True)
-                    # total_attn, boxes, return_feats, box_labels = None, None, None, None
                     batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if
                                   key in self.keys}
                     if self.region_cls:
@@ -436,20 +424,7 @@ class Trainer(BaseTrainer):
                         region_masks = get_region_mask(region_labels).cpu()
                         region_labels = region_labels[region_masks]
 
-                        # if self.att_cls:
-                        #     attribute_masks = data['attribute_masks']
-                        #     attribute_labels = data['attribute_labels']
-                        #     if len(attribute_labels) > 0:
-                        #         attribute_labels = data['attribute_labels'].to(device, non_blocking=True)
-
                     with autocast(dtype=torch.float16):
-                        # if split == 'val':
-                        #     output = self.model(batch_dict,mode='train', return_feats=True)
-                        #     rrg_preds = output['rrg_preds']
-                        #     loss = self.criterion(rrg_preds, batch_dict['text'], batch_dict['mask'])
-                        #     val_ce_losses.update(loss.item(),rrg_preds.size(0))
-                        # # output, _ = self.model(images,reports_ids,mode='sample')
-                        # else:
                         output = self.model(batch_dict, mode='sample')
 
                         if self.region_cls:
@@ -465,19 +440,17 @@ class Trainer(BaseTrainer):
                                     region_preds = region_probs.cpu()
                                     region_targets = region_labels.cpu()
 
-                        # if self.att_cls:
-                        #     att_logits = output['att_logits'][attribute_masks == 1]
-                        #     att_probs = output['att_probs'][attribute_masks == 1]
-                        #     if len(attribute_labels) > 0:
-                        #         val_att_cls_loss = self.att_cls_criterion(att_logits, attribute_labels)
-                        #         val_att_cls_losses.update(val_att_cls_loss.item(), sum(attribute_masks))
-                        #         if len(attribute_preds) > 0:
-                        #             attribute_preds = torch.cat((attribute_preds, att_probs.cpu()), dim=0)
-                        #             attribute_targets = torch.cat((attribute_targets, attribute_labels.cpu()), dim=0)
-                        #     else:
-                        #         if len(attribute_labels) > 0:
-                        #             attribute_preds = attribute_preds.cpu()
-                        #             attribute_targets = attribute_targets.cpu()
+                        if self.att_cls:
+                            att_probs_record = output['att_probs_record']
+                            attribute_labels = data['attribute_label_dicts']
+                            for bs_id in att_probs_record.keys():
+                                for box_label in att_probs_record[bs_id]:
+                                    if box_label in attribute_labels[bs_id]:
+                                        attribute_preds[box_label].append(
+                                            att_probs_record[bs_id][box_label][:cgnome_id2cat[box_label]].unsqueeze(0))
+                                        attribute_targets[box_label].append(
+                                            attribute_labels[bs_id][box_label])
+
                         if self.use_new_bs:
                             output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
                         else:
@@ -499,9 +472,18 @@ class Trainer(BaseTrainer):
                 if self.region_cls:
                     region_auc = calculate_auc(preds=region_preds, targets=region_targets)
                     log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
-                # if self.att_cls:
-                #     att_auc = calculate_auc(preds=attribute_preds, targets=attribute_targets)
-                #     log.update({f'{split}_att_auc': region_auc, f"{split}_att_loss": val_att_cls_losses.avg})
+                if self.att_cls:
+                    att_aucs = []
+                    for key in att_probs_record.keys():
+                        try:
+                            att_auc = calculate_auc(preds=torch.cat(attribute_preds[key], dim=0),
+                                                 targets=torch.cat(attribute_targets[key], dim=0))
+                            att_aucs.append(att_auc)
+                        except  ValueError:
+                            self.logger.info(f'Att calculation on category {categories[key]} fails.')
+                            continue
+                    att_auc = np.mean(att_aucs) if att_aucs else 0
+                    log.update({f'{split}_att_auc': att_auc})
         return log
 
     def test(self):

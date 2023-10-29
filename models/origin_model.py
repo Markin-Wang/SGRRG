@@ -18,6 +18,7 @@ from .scene_graph_encoder import SceneGraphEncoder
 from .vision_encoder import VisionEncoder
 from .decoder import Decoder
 from .word_embedding import BertEmbeddings, BasicEmbedding
+from collections import defaultdict
 
 
 class RRGModel(nn.Module):
@@ -174,6 +175,10 @@ class RRGModel(nn.Module):
         if self.att_cls:
             box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
             att_probs = torch.sigmoid(att_logits)
+            att_probs_record = defaultdict(dict)
+            for i in range(len(att_probs)):
+                bs_id, box_category = boxes[i,0].long(),box_labels[i].long()
+                att_probs_record[bs_id.item()][box_category.item()] = att_probs[i].cpu()
             if self.use_box_feats:
                 patch_feats = box_feats
 
@@ -193,7 +198,7 @@ class RRGModel(nn.Module):
         return_dicts.update({'encoded_img_feats': patch_feats,
                              'region_logits': region_logits,
                              'region_probs': region_probs,
-                             'att_probs': att_probs,
+                             'att_probs_record': att_probs_record,
                              #'no_box_ids': no_box_ids,
                              'sg_embeds': sg_embeds if self.sgade else None,
                              'sg_masks':sg_masks if self.sgade else None,

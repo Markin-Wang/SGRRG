@@ -113,8 +113,7 @@ class BaseDatasetArrow(Dataset):
                                                                      {"boxes": bboxes, "labels": box_ann['labels']})
                 image_tensor = self.transform['norm_to_tensor'](image_tensor)
                 region_labels = self.get_region_label(image_id=iid)
-                if self.split == 'train':
-                    box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
+                box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
             if self.att_cls:
                 attribute_labels = self.get_attribute_label(image_id=iid)
 
@@ -134,8 +133,9 @@ class BaseDatasetArrow(Dataset):
             return_dict.update(box_ann)
             return_dict.update({'region_labels': region_labels})
 
-        if self.att_cls and self.split == 'train':
-            return_dict.update({"attribute_labels": attribute_labels})
+        if self.att_cls:
+            name = "attribute_labels" if self.split == 'train' else "attribute_label_dicts"
+            return_dict.update({name: attribute_labels})
 
         return return_dict
 
@@ -352,5 +352,5 @@ class BaseDatasetArrow(Dataset):
         return attribute_anns, region_anns
 
     def __len__(self):
-        ratio = 20 if self.split == 'train' else 20
+        ratio = 20 if self.split == 'train' else 10
         return len(self.all_texts) // ratio if self.debug else len(self.all_texts)
