@@ -130,7 +130,7 @@ class R2DataLoader(DataLoader):
                 'num_workers': self.num_workers,
                 'pin_memory': True,
                 'drop_last': self.drop_last,
-                'prefetch_factor': self.batch_size // self.num_workers * 2
+                #'prefetch_factor': self.batch_size // self.num_workers * 2
             }
 
         # num_tasks = dist.get_world_size()
