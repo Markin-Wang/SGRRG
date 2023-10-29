@@ -146,8 +146,8 @@ class BaseTrainer(object):
                     log.update(self._valid(epoch, 'test'))
                 # save logged informations into log dict
                 # synchronize log in different gpu
-                self.logger.info('Evaluation completed.')
-                log = self._broadcast_data(log)
+                # self.logger.info('Evaluation completed.')
+                # log = self._broadcast_data(log)
 
                 log['epoch'] = epoch
 
@@ -508,7 +508,6 @@ class Trainer(BaseTrainer):
                                            {i: [re] for i, re in enumerate(val_res)})
                 log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
                 val_res, val_gts = None, None
-        dist.barrier()
         return log
 
     def _pad(self, data):
