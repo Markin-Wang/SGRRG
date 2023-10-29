@@ -154,7 +154,6 @@ class BaseTrainer(object):
                 for key, value in log.items():
                     self.logger.info('\t{:15s}: {}'.format(str(key), value))
 
-
                 improved = self._record_best(log)
 
                 best = False
@@ -210,7 +209,7 @@ class BaseTrainer(object):
             object = [log]
         else:
             object = [None]
-        torch.distributed.broadcast_object_list(object,src=self.local_rank)
+        torch.distributed.broadcast_object_list(object, src=self.local_rank)
         return object[0]
 
     def _print_best_to_file(self):
@@ -447,11 +446,11 @@ class Trainer(BaseTrainer):
                                 val_region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
                                 val_region_cls_losses.update(val_region_cls_loss.item())
                                 if len(region_preds) > 0:
-                                    region_preds = torch.cat((region_preds, region_probs), dim=0)
-                                    region_targets = torch.cat((region_targets, region_labels), dim=0)
+                                    region_preds = torch.cat((region_preds, region_probs.cpu()), dim=0)
+                                    region_targets = torch.cat((region_targets, region_labels.cpu()), dim=0)
                                 else:
-                                    region_preds = region_probs
-                                    region_targets = region_labels
+                                    region_preds = region_probs.cpu()
+                                    region_targets = region_labels.cpu()
 
                         if self.att_cls:
                             att_probs_record = output['att_probs_record']
@@ -462,7 +461,7 @@ class Trainer(BaseTrainer):
                                         attribute_preds[box_label].append(
                                             att_probs_record[bs_id][box_label][:cgnome_id2cat[box_label]].unsqueeze(0))
                                         attribute_targets[box_label].append(
-                                            attribute_labels[bs_id][box_label].to(device))
+                                            attribute_labels[bs_id][box_label])
 
                         if self.use_new_bs:
                             output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
@@ -479,6 +478,26 @@ class Trainer(BaseTrainer):
                     #                  mse_ls=val_mse_losses / (batch_idx + 1), mem=f'mem {memory_used:.0f}MB')
 
                     pbar.update()
+
+                if split == 'val':
+                    log.update({'val_ce_loss': val_ce_losses.avg})
+
+                if self.region_cls:
+                    region_auc = calculate_auc(preds=region_preds, targets=region_targets.long())
+                    log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
+                if self.att_cls:
+                    att_aucs = []
+                    for key in attribute_preds.keys():
+                        try:
+                            att_auc = calculate_auc(preds=torch.cat(attribute_preds[key], dim=0),
+                                                    targets=torch.cat(attribute_targets[key], dim=0).long())
+                            att_aucs.append(att_auc)
+                        except  ValueError:
+                            self.logger.info(f'Att calculation on category {categories[key]} fails.')
+                            continue
+                    att_auc = np.mean(att_aucs) if att_aucs else 0
+                    log.update({f'{split}_att_auc': att_auc})
+
                 val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
                 val_res, val_gts = gather_preds_and_gts(val_res, val_gts)
                 if dist.get_rank() == self.local_rank:
@@ -489,44 +508,20 @@ class Trainer(BaseTrainer):
                                                {i: [re] for i, re in enumerate(val_res)})
                     log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
                     val_res, val_gts = None, None
-
-                if split == 'val':
-                    log.update({'val_ce_loss': val_ce_losses.avg})
-
-                if self.region_cls:
-                    region_preds, region_targets = gather_preds_and_gts(region_preds, region_targets)
-                    if dist.get_rank() == self.local_rank:
-                        region_preds, region_targets = torch.cat(region_preds,dim=0), torch.cat(region_targets,dim=0).long()
-                        region_auc = calculate_auc(preds=region_preds.cpu().numpy(), targets=region_targets.cpu().numpy())
-                        log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
-                if self.att_cls:
-                    att_aucs = []
-                    for key in attribute_preds.keys():
-                        try:
-                            att_preds, att_gts = torch.cat(attribute_preds[key], dim=0), torch.cat(attribute_targets[key], dim=0)
-                            att_preds, att_gts = gather_preds_and_gts(att_preds, att_gts)
-                            if dist.get_rank() == self.local_rank:
-                                att_preds, att_gts = torch.cat(att_preds, dim=0), torch.cat(att_gts,dim=0).long()
-                                att_auc = calculate_auc(preds=att_preds.cpu().numpy(),targets=att_gts.cpu().numpy())
-                                att_aucs.append(att_auc)
-                        except  ValueError:
-                            self.logger.info(f'Att calculation on category {categories[key]} fails.')
-                            continue
-                    att_auc = np.mean(att_aucs) if att_aucs else 0
-                    log.update({f'{split}_att_auc': att_auc})
+        dist.barrier()
         return log
 
-    def _pad(self,data):
-        padded_data = torch.full((len(data),self.max_seq_length-1),self.pad_idx,device=data[0].device)
-        for i,cur_data in enumerate(data):
-            padded_data[i,:cur_data.size(0)] = cur_data
+    def _pad(self, data):
+        padded_data = torch.full((len(data), self.max_seq_length - 1), self.pad_idx, device=data[0].device)
+        for i, cur_data in enumerate(data):
+            padded_data[i, :cur_data.size(0)] = cur_data
         return padded_data
 
     def test(self):
         self.logger.info('Starting evaluating the best checkpoint in test set.')
         log = {}
         log.update(self._valid(0, 'test'))
-        #log = self._synchronize_data(log)
+        # log = self._synchronize_data(log)
         self.logger.info('The result for the best performed models in test set.')
         for key, value in log.items():
             self.logger.info('\t{:15s}: {}'.format(str(key), value))

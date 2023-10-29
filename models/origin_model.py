@@ -178,7 +178,7 @@ class RRGModel(nn.Module):
             att_probs_record = defaultdict(dict)
             for i in range(len(att_probs)):
                 bs_id, box_category = boxes[i,0].long(),box_labels[i].long()
-                att_probs_record[bs_id.item()][box_category.item()] = att_probs[i]
+                att_probs_record[bs_id.item()][box_category.item()] = att_probs[i].cpu()
             if self.use_box_feats:
                 patch_feats = box_feats
 
