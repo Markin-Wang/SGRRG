@@ -496,7 +496,7 @@ class Trainer(BaseTrainer):
                 if self.region_cls:
                     region_preds, region_targets = gather_preds_and_gts(region_preds, region_targets)
                     if dist.get_rank() == self.local_rank:
-                        region_preds, region_targets = torch.cat(region_preds,dim=0), torch.cat(region_targets,dim=0)
+                        region_preds, region_targets = torch.cat(region_preds,dim=0), torch.cat(region_targets,dim=0).long()
                         print(torch.unique(region_targets),region_targets.dtype)
                         region_auc = calculate_auc(preds=region_preds.cpu().numpy(), targets=region_targets.cpu().numpy())
                         log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
@@ -507,7 +507,7 @@ class Trainer(BaseTrainer):
                             att_preds, att_gts = torch.cat(attribute_preds[key], dim=0), torch.cat(attribute_targets[key], dim=0)
                             att_preds, att_gts = gather_preds_and_gts(att_preds, att_gts)
                             if dist.get_rank() == self.local_rank:
-                                att_preds, att_gts = torch.cat(att_preds, dim=0), torch.cat(att_gts,dim=0)
+                                att_preds, att_gts = torch.cat(att_preds, dim=0), torch.cat(att_gts,dim=0).long()
                                 att_auc = calculate_auc(preds=att_preds.cpu().numpy(),targets=att_gts.cpu().numpy())
                                 att_aucs.append(att_auc)
                         except  ValueError:

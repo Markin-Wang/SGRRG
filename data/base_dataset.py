@@ -344,7 +344,7 @@ class BaseDatasetArrow(Dataset):
         for k, v in anns.items():
             region_label = v['region_label']
             region_label_ = torch.zeros(1, num_regions)
-            region_label_[0, region_label] = 1.0  # ensure the label consistency
+            region_label_[0, region_label] = 1  # ensure the label consistency
             region_anns[k] = region_label_
             v.pop('region_label')
             attribute_anns[k] = {self.name2label[kk]: vv for kk, vv in v.items()}
