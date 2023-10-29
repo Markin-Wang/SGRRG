@@ -501,14 +501,13 @@ class Trainer(BaseTrainer):
 
                 val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
                 val_res, val_gts = gather_preds_and_gts(val_res, val_gts)
-                if dist.get_rank() == self.local_rank:
-                    val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
-                    val_res, val_gts = self.tokenizer.decode_batch(val_res.cpu().numpy()), self.tokenizer.decode_batch(
-                        val_gts.cpu().numpy())
-                    val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},
-                                               {i: [re] for i, re in enumerate(val_res)})
-                    log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
-                    val_res, val_gts = None, None
+                val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
+                val_res, val_gts = self.tokenizer.decode_batch(val_res.cpu().numpy()), self.tokenizer.decode_batch(
+                    val_gts.cpu().numpy())
+                val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},
+                                           {i: [re] for i, re in enumerate(val_res)})
+                log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
+                val_res, val_gts = None, None
         dist.barrier()
         return log
 
