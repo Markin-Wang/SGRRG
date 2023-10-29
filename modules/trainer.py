@@ -497,7 +497,8 @@ class Trainer(BaseTrainer):
                     region_preds, region_targets = gather_preds_and_gts(region_preds, region_targets)
                     if dist.get_rank() == self.local_rank:
                         region_preds, region_targets = torch.cat(region_preds,dim=0), torch.cat(region_targets,dim=0)
-                        print(1111,region_preds.shape, region_targets.shape)
+                        print(11111,region_preds)
+                        print(22222, region_targets)
                         region_auc = calculate_auc(preds=region_preds.cpu().numpy(), targets=region_targets.cpu().numpy())
                         log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
                 if self.att_cls:
@@ -570,11 +571,11 @@ class Trainer(BaseTrainer):
                                 val_region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
                                 val_region_cls_losses.update(val_region_cls_loss.item())
                                 if len(region_preds) > 0:
-                                    region_preds = torch.cat((region_preds, region_probs.cpu()), dim=0)
-                                    region_targets = torch.cat((region_targets, region_labels.cpu()), dim=0)
+                                    region_preds = torch.cat((region_preds, region_probs), dim=0)
+                                    region_targets = torch.cat((region_targets, region_labels), dim=0)
                                 else:
-                                    region_preds = region_probs.cpu()
-                                    region_targets = region_labels.cpu()
+                                    region_preds = region_probs
+                                    region_targets = region_labels
 
                         if self.use_new_bs:
                             output = self.beam_search.caption_test_step(self.model.module, image_embeds=patch_feats)
