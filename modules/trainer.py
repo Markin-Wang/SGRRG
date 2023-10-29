@@ -146,6 +146,7 @@ class BaseTrainer(object):
                     log.update(self._valid(epoch, 'test'))
                 # save logged informations into log dict
                 # synchronize log in different gpu
+                self.logger.info('Evaluation completed.')
                 log = self._broadcast_data(log)
 
                 log['epoch'] = epoch
@@ -205,7 +206,7 @@ class BaseTrainer(object):
     def _broadcast_data(self, log):
         # pairs = [[k, v] for k, v in log.items()]
         # keys = [x[0] for x in pairs]
-        if dist.get_rank() == 0:
+        if dist.get_rank() == self.local_rank:
             object = [log]
         else:
             object = [None]
@@ -521,7 +522,7 @@ class Trainer(BaseTrainer):
         self.logger.info('Starting evaluating the best checkpoint in test set.')
         log = {}
         log.update(self._valid(0, 'test'))
-        # log = self._synchronize_data(log)
+        log = self._broadcast_data(log)
         self.logger.info('The result for the best performed models in test set.')
         for key, value in log.items():
             self.logger.info('\t{:15s}: {}'.format(str(key), value))
