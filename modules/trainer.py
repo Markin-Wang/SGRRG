@@ -497,8 +497,8 @@ class Trainer(BaseTrainer):
                     region_preds, region_targets = gather_preds_and_gts(region_preds, region_targets)
                     if dist.get_rank() == self.local_rank:
                         region_preds, region_targets = torch.cat(region_preds,dim=0), torch.cat(region_targets,dim=0)
-                        print(11111,region_preds)
-                        print(22222, region_targets)
+                        print(11111,region_preds[:16])
+                        print(22222, region_targets[:16])
                         region_auc = calculate_auc(preds=region_preds.cpu().numpy(), targets=region_targets.cpu().numpy())
                         log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
                 if self.att_cls:
