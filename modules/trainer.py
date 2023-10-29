@@ -474,7 +474,7 @@ class Trainer(BaseTrainer):
                     log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
                 if self.att_cls:
                     att_aucs = []
-                    for key in att_probs_record.keys():
+                    for key in attribute_preds.keys():
                         try:
                             att_auc = calculate_auc(preds=torch.cat(attribute_preds[key], dim=0),
                                                  targets=torch.cat(attribute_targets[key], dim=0))
