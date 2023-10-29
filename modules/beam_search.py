@@ -396,7 +396,7 @@ class BeamSearch:
             #     captions.append(tokenizer.decode(text_id).replace(tokenizer.pad_token, ""))
             # captions = tokenizer.batch_decode(text_ids, skip_special_tokens=True)
         # return {"image_ids": batch["iid"], "captions": captions, "gts": gts}
-        return {'preds': text_ids.cpu()}
+        return {'preds': text_ids}
 
     # def beam_search_simplified(self, model, init_state, init_logprobs,patch_feats=None,mask=None):
     #

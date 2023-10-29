@@ -460,3 +460,14 @@ def calculate_auc(preds, targets):
 def get_region_mask(region_labels):
     region_sum = torch.sum(region_labels,dim=1)
     return region_sum != 0
+
+
+def gather_preds_and_gts(predictions, references):
+    # Gather all predictions and references to process 0
+    gathered_predictions = [torch.zeros_like(predictions) for _ in range(dist.get_world_size())]
+    gathered_references = [torch.zeros_like(references) for _ in range(dist.get_world_size())]
+
+    dist.all_gather(gathered_predictions, predictions)
+    dist.all_gather(gathered_references, references)
+
+    return gathered_predictions, gathered_references
