@@ -477,6 +477,7 @@ class Trainer(BaseTrainer):
                     memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
                     # pbar.set_postfix(ce_ls=val_ce_losses / (batch_idx + 1), cls_ls=val_img_cls_losses / (batch_idx + 1),
                     #                  mse_ls=val_mse_losses / (batch_idx + 1), mem=f'mem {memory_used:.0f}MB')
+
                     pbar.update()
                 val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
                 val_res, val_gts = gather_preds_and_gts(val_res, val_gts)
@@ -496,6 +497,7 @@ class Trainer(BaseTrainer):
                     region_preds, region_targets = gather_preds_and_gts(region_preds, region_targets)
                     if dist.get_rank() == self.local_rank:
                         region_preds, region_targets = torch.cat(region_preds,dim=0), torch.cat(region_targets,dim=0)
+                        print(1111,region_preds.shape, region_targets.shape)
                         region_auc = calculate_auc(preds=region_preds.cpu().numpy(), targets=region_targets.cpu().numpy())
                         log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
                 if self.att_cls:
