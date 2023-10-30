@@ -9,7 +9,8 @@ class AttributePredictor(nn.Module):
     def __init__(self, config):
         super(AttributePredictor, self).__init__()
         self.img_resolution = config['image_size']  # the image resolution used to do object detection
-        self.feature_size = config['d_vf']  # feature size output by the visual extractor
+        self.spatial_scale = config['num_tokens'] / self.img_resolution  # feature size output by the visual extractor
+        self.feature_size = config['d_vf']
         self.output_size = config['output_size']
         self.num_attributes = config['num_attributes']
         self.use_box_feats = config['use_box_feats']
@@ -18,9 +19,8 @@ class AttributePredictor(nn.Module):
         self.num_classes = config['num_classes']
         self.att_pad_idx = config['att_pad_idx']
         self.use_amp = config['use_amp']
-
         self.roi_pool = RoIPool(output_size=[self.output_size, self.output_size],
-                                spatial_scale=self.img_resolution // self.feature_size)
+                                spatial_scale= self.spatial_scale)
         # self.conv = nn.Conv2d(in_channels=self.feature_size, out_channels=self.feature_size,
         #                       kernel_size=self.output_size,
         #                       stride=1,

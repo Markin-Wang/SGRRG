@@ -112,7 +112,7 @@ def config():
     # attribute classification setting
     att_cls = False  # attribute classification
     att_cls_w = 0.5
-    feature_size = image_size // 32  # 32 is the downsampling rate for the visual extractor
+    num_tokens = image_size / 32  # 32 is the downsampling rate for the visual extractor
     output_size = 1
     num_classes = 29  # the number of anatomical locations
     region_select_threshold = 0.5  # the threshold used to select the region after sigmoid

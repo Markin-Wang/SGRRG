@@ -160,7 +160,18 @@ class R2DataLoader(DataLoader):
         if 'attribute_label_dicts' in batch[0].keys():
             keys.extend(['attribute_label_dicts'])
 
+
         batch_dict = {key: [sample[key] for sample in batch] for key in keys}
+
+        # print(1111,batch_dict['boxes'][0])
+        #
+        # print(2222, batch_dict['box_labels'][0])
+        #
+        # print(3333,batch_dict['attribute_labels'][0])
+        #
+        # print(4444,batch_dict['img_id'][0])
+        #
+        # exit()
 
         reports_ids, reports_masks, seq_lengths, = batch_dict['text'], batch_dict['mask'], batch_dict['seq_length']
 

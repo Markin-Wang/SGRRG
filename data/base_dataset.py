@@ -111,7 +111,9 @@ class BaseDatasetArrow(Dataset):
                                                 )
                 image_tensor, box_ann = self.transform['common_aug'](image,
                                                                      {"boxes": bboxes, "labels": box_ann['labels']})
+
                 image_tensor = self.transform['norm_to_tensor'](image_tensor)
+
                 region_labels = self.get_region_label(image_id=iid)
                 box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
             if self.att_cls:
@@ -352,5 +354,5 @@ class BaseDatasetArrow(Dataset):
         return attribute_anns, region_anns
 
     def __len__(self):
-        ratio = 50 if self.split == 'train' else 40
+        ratio = 20 if self.split == 'train' else 10
         return len(self.all_texts) // ratio if self.debug else len(self.all_texts)
