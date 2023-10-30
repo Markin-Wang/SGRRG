@@ -447,11 +447,11 @@ class Trainer(BaseTrainer):
                                 val_region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
                                 val_region_cls_losses.update(val_region_cls_loss.item())
                                 if len(region_preds) > 0:
-                                    region_preds = torch.cat((region_preds, region_probs), dim=0)
-                                    region_targets = torch.cat((region_targets, region_labels), dim=0)
+                                    region_preds = torch.cat((region_preds, region_probs.cpu()), dim=0)
+                                    region_targets = torch.cat((region_targets, region_labels.cpu()), dim=0)
                                 else:
-                                    region_preds = region_probs
-                                    region_targets = region_labels
+                                    region_preds = region_probs.cpu()
+                                    region_targets = region_labels.cpu()
 
                         if self.att_cls:
                             att_probs_record = output['att_probs_record']
@@ -462,7 +462,7 @@ class Trainer(BaseTrainer):
                                         attribute_preds[box_label].append(
                                             att_probs_record[bs_id][box_label][:cgnome_id2cat[box_label]].unsqueeze(0))
                                         attribute_targets[box_label].append(
-                                            attribute_labels[bs_id][box_label].to(device))
+                                            attribute_labels[bs_id][box_label])
 
                         if self.use_new_bs:
                             output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
@@ -485,21 +485,14 @@ class Trainer(BaseTrainer):
 
                 if self.region_cls:
                     # ensure the data in each rank is the same to perform evaluation
-                    region_preds, region_targets = gather_preds_and_gts(region_preds, region_targets)
-                    region_preds, region_targets = torch.cat(region_preds, dim=0).cpu().numpy(),\
-                                                   torch.cat(region_targets, dim=0).long().cpu().numpy()
-                    region_auc = calculate_auc(preds=region_preds, targets=region_targets)
+                    region_auc = calculate_auc(preds=region_preds.numpy(), targets=region_targets.long().numpy())
                     log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
                 if self.att_cls:
                     att_aucs = []
                     for key in attribute_preds.keys():
                         try:
-                            att_preds, att_gts = torch.cat(attribute_preds[key], dim=0), torch.cat(
-                                attribute_targets[key], dim=0)
-                            att_preds, att_gts = gather_preds_and_gts(att_preds, att_gts)
-                            att_preds, att_gts = torch.cat(att_preds, dim=0).cpu().numpy(), \
-                                                 torch.cat(att_gts,dim=0).long().cpu().numpy()
-                            att_auc = calculate_auc(preds=att_preds, targets=att_gts)
+                            att_auc = calculate_auc(preds=torch.cat(attribute_preds[key], dim=0).numpy(),
+                                                    targets=torch.cat(attribute_targets[key], dim=0).long().numpy())
                             att_aucs.append(att_auc)
                         except  ValueError:
                             self.logger.info(f'Att calculation on category {categories[key]} fails.')
