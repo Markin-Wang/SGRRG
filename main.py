@@ -170,7 +170,7 @@ def main(_config):
         #     model, optimizer = amp.initialize(model, optimizer, opt_level=args.amp_opt_level)
 
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device_id], broadcast_buffers=False,
-                                                          find_unused_parameters=_config['debug'])
+                                                          find_unused_parameters=False)
         logger.info(f'loading model weights from {load_path}.')
         trainer = Trainer(model, criterion, metrics, optimizer, lr_scheduler, dm, writer, logger, _config)
         trainer.test()

@@ -522,7 +522,7 @@ class Trainer(BaseTrainer):
         self.logger.info('Starting evaluating the best checkpoint in test set.')
         log = {}
         log.update(self._valid(0, 'test'))
-        log = self._broadcast_data(log)
+        #log = self._broadcast_data(log)
         self.logger.info('The result for the best performed models in test set.')
         for key, value in log.items():
             self.logger.info('\t{:15s}: {}'.format(str(key), value))
