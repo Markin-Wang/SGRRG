@@ -85,4 +85,5 @@ class AttributePredictor(nn.Module):
             sample_ids = box_labels == label_id
             logits_i = self.attribute_heads[label_id](x[sample_ids])
             logits[sample_ids, :id2cat[label_id]] = logits_i
+        # box order to form the logits
         return x, logits

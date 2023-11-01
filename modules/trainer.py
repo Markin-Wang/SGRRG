@@ -463,7 +463,6 @@ class Trainer(BaseTrainer):
                                             att_probs_record[bs_id][box_label][:cgnome_id2cat[box_label]].unsqueeze(0))
                                         attribute_targets[box_label].append(
                                             attribute_labels[bs_id][box_label])
-
                         if self.use_new_bs:
                             output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
                         else:
@@ -491,8 +490,14 @@ class Trainer(BaseTrainer):
                     att_aucs = []
                     for key in attribute_preds.keys():
                         try:
-                            att_auc = calculate_auc(preds=torch.cat(attribute_preds[key], dim=0).numpy(),
-                                                    targets=torch.cat(attribute_targets[key], dim=0).long().numpy())
+                            att_preds, att_gts = torch.cat(attribute_preds[key], dim=0), torch.cat(
+                                attribute_targets[key], dim=0)
+                            column_sum = att_gts.sum(dim=0)
+                            selected_column_ids = column_sum != 0
+                            # print(f'{selected_column_ids.sum()} out of {selected_column_ids.shape[0]} categories selected.')
+                            att_preds, att_gts = att_preds[:,selected_column_ids], att_gts[:, selected_column_ids]
+                            att_auc = calculate_auc(preds=att_preds.numpy(),
+                                                    targets=att_gts.long().numpy())
                             att_aucs.append(att_auc)
                         except  ValueError:
                             self.logger.info(f'Att calculation on category {categories[key]} fails.')
@@ -522,7 +527,7 @@ class Trainer(BaseTrainer):
         self.logger.info('Starting evaluating the best checkpoint in test set.')
         log = {}
         log.update(self._valid(0, 'test'))
-        #log = self._broadcast_data(log)
+        # log = self._broadcast_data(log)
         self.logger.info('The result for the best performed models in test set.')
         for key, value in log.items():
             self.logger.info('\t{:15s}: {}'.format(str(key), value))

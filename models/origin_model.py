@@ -176,6 +176,8 @@ class RRGModel(nn.Module):
             box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
             att_probs = torch.sigmoid(att_logits)
             att_probs_record = defaultdict(dict)
+            boxes, box_labels = boxes[box_masks], box_labels[box_masks]
+            print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
             for i in range(len(att_probs)):
                 bs_id, box_category = boxes[i,0].long(),box_labels[i].long()
                 att_probs_record[bs_id.item()][box_category.item()] = att_probs[i].cpu()
@@ -183,7 +185,7 @@ class RRGModel(nn.Module):
                 patch_feats = box_feats
 
         if self.use_sg:
-            boxes, box_labels = boxes[box_masks], box_labels[box_masks]
+            # boxes, box_labels = boxes[box_masks], box_labels[box_masks]
             sg_embeds, sg_masks = self.scene_graph_encoder(boxes, box_feats, box_labels, batch_size=patch_feats.size(0),
                                                            att_probs=att_probs)
 

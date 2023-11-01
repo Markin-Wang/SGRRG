@@ -169,9 +169,13 @@ class R2DataLoader(DataLoader):
         #
         # print(3333,batch_dict['attribute_labels'][0])
         #
-        # print(4444,batch_dict['img_id'][0])
+        # print(1111, batch_dict['img_id'][0])
         #
-        # exit()
+        # print(2222, batch_dict['attribute_labels'][0])
+        #
+        # print(3333, batch_dict['img_id'][0], batch_dict['region_labels'][0])
+
+
 
         reports_ids, reports_masks, seq_lengths, = batch_dict['text'], batch_dict['mask'], batch_dict['seq_length']
 
@@ -219,6 +223,7 @@ class R2DataLoader(DataLoader):
             max_att = -1
             for i, attribute_label in enumerate(batch_dict['attribute_labels']):
                 i_box_labels = selected_box_labels[selected_boxes_bsid == i]
+                #print(1111,i,batch_dict['img_id'][i],torch.nonzero(selected_boxes_bsid == i).flatten())
                 if len(attribute_label) == 0:
                     attribute_masks.append(torch.ones(i_box_labels.size(0)))
                     continue
@@ -235,7 +240,7 @@ class R2DataLoader(DataLoader):
                     attribute_labels.append(attribute_label_)
             if attribute_labels:
                 # batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=0)
-                batch_dict['attribute_labels'] = torch.cat(attribute_labels, dim=-1)
+                batch_dict['attribute_labels'] = torch.cat(attribute_labels, dim=-1) # [1, len]
                 # print(1111,batch_dict['attribute_labels'].shape, (batch_dict['attribute_labels']==1).sum()/batch_dict['attribute_labels'].shape[1])
                 # around 8% positive labels
                 attribute_ids_ = torch.full((len(attribute_labels), max_att), -10000, dtype=torch.long)  # att_pad_idx is -1e4
