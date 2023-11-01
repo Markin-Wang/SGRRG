@@ -177,7 +177,7 @@ class RRGModel(nn.Module):
             att_probs = torch.sigmoid(att_logits)
             att_probs_record = defaultdict(dict)
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
-            print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
+            #print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
             for i in range(len(att_probs)):
                 bs_id, box_category = boxes[i,0].long(),box_labels[i].long()
                 att_probs_record[bs_id.item()][box_category.item()] = att_probs[i].cpu()
