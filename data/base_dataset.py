@@ -137,8 +137,8 @@ class BaseDatasetArrow(Dataset):
             return_dict.update({'region_labels': region_labels})
 
         if self.att_cls:
-            # name = "attribute_labels" if self.split == 'train' else "attribute_label_dicts"
-            name = "attribute_labels"
+            name = "attribute_labels" if self.split == 'train' else "attribute_label_dicts"
+            # name = "attribute_labels"
             return_dict.update({name: attribute_labels})
 
         return return_dict

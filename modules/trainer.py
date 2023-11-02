@@ -453,16 +453,16 @@ class Trainer(BaseTrainer):
                                     region_preds = region_probs.cpu()
                                     region_targets = region_labels.cpu()
 
-                        # if self.att_cls:
-                        #     att_probs_record = output['att_probs_record']
-                        #     attribute_labels = data['attribute_label_dicts']
-                        #     for bs_id in att_probs_record.keys():
-                        #         for box_label in att_probs_record[bs_id]:
-                        #             if box_label in attribute_labels[bs_id]:
-                        #                 attribute_preds[box_label].append(
-                        #                     att_probs_record[bs_id][box_label][:cgnome_id2cat[box_label]].unsqueeze(0))
-                        #                 attribute_targets[box_label].append(
-                        #                     attribute_labels[bs_id][box_label])
+                        if self.att_cls:
+                            att_probs_record = output['att_probs_record']
+                            attribute_labels = data['attribute_label_dicts']
+                            for bs_id in att_probs_record.keys():
+                                for box_label in att_probs_record[bs_id]:
+                                    if box_label in attribute_labels[bs_id]:
+                                        attribute_preds[box_label].append(
+                                            att_probs_record[bs_id][box_label][:cgnome_id2cat[box_label]].unsqueeze(0))
+                                        attribute_targets[box_label].append(
+                                            attribute_labels[bs_id][box_label])
                         if self.use_new_bs:
                             output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
                         else:
@@ -486,24 +486,24 @@ class Trainer(BaseTrainer):
                     # ensure the data in each rank is the same to perform evaluation
                     region_auc = calculate_auc(preds=region_preds.numpy(), targets=region_targets.long().numpy())
                     log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
-                # if self.att_cls:
-                #     att_aucs = []
-                #     for key in attribute_preds.keys():
-                #         try:
-                #             att_preds, att_gts = torch.cat(attribute_preds[key], dim=0), torch.cat(
-                #                 attribute_targets[key], dim=0)
-                #             column_sum = att_gts.sum(dim=0)
-                #             selected_column_ids = column_sum != 0
-                #             # print(f'{selected_column_ids.sum()} out of {selected_column_ids.shape[0]} categories selected.')
-                #             att_preds, att_gts = att_preds[:,selected_column_ids], att_gts[:, selected_column_ids]
-                #             att_auc = calculate_auc(preds=att_preds.numpy(),
-                #                                     targets=att_gts.long().numpy())
-                #             att_aucs.append(att_auc)
-                #         except  ValueError:
-                #             self.logger.info(f'Att calculation on category {categories[key]} fails.')
-                #             continue
-                #     att_auc = np.mean(att_aucs) if att_aucs else 0
-                #     log.update({f'{split}_att_auc': att_auc})
+                if self.att_cls:
+                    att_aucs = []
+                    for key in attribute_preds.keys():
+                        try:
+                            att_preds, att_gts = torch.cat(attribute_preds[key], dim=0), torch.cat(
+                                attribute_targets[key], dim=0)
+                            column_sum = att_gts.sum(dim=0)
+                            selected_column_ids = column_sum != 0
+                            # print(f'{selected_column_ids.sum()} out of {selected_column_ids.shape[0]} categories selected.')
+                            att_preds, att_gts = att_preds[:,selected_column_ids], att_gts[:, selected_column_ids]
+                            att_auc = calculate_auc(preds=att_preds.numpy(),
+                                                    targets=att_gts.long().numpy())
+                            att_aucs.append(att_auc)
+                        except  ValueError:
+                            self.logger.info(f'Att calculation on category {categories[key]} fails.')
+                            continue
+                    att_auc = np.mean(att_aucs) if att_aucs else 0
+                    log.update({f'{split}_att_auc': att_auc})
 
                 val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
                 # ensure the data in each rank is the same to perform evaluation
