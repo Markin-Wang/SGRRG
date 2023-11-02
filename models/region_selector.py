@@ -6,12 +6,19 @@ import torch
 class RegionSelector(nn.Module):
     def __init__(self, config):
         super(RegionSelector, self).__init__()
-
+        self.drop_prob = config['dropout']
+        self.ff = nn.Sequential(
+            nn.Linear(config['d_vf'], config['d_vf']),
+            nn.GELU(),
+            nn.Dropout(p=self.drop_prob),
+        )
+        self.ff.apply(init_weights)
         self.region_head = nn.Linear(config['d_vf'], config['num_classes'])
         self.region_head.apply(init_weights)
         self.region_select_threshold = config['region_select_threshold']
 
-    def forward(self,x,boxes=None,box_labels=None,box_masks=None):
+    def forward(self,x, boxes=None,box_labels=None,box_masks=None):
+        x = self.ff(x)
         logits = self.region_head(x)
 
         if box_masks is not None:

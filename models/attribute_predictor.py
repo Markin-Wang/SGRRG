@@ -27,7 +27,6 @@ class AttributePredictor(nn.Module):
         #                       bias=False)
 
         # mention not use conv net as resolution in 224 two small, cause majority less than 2
-        # if larger resolution, okay
 
         self.ff = nn.Sequential(
             nn.Linear(self.feature_size, self.feature_size),

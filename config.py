@@ -8,7 +8,7 @@ def config():
     exp_name = "fiber"
     seed = 0
     data_dir = 'datasets'
-    # datasets = ["coco", "vg", "sbu", "gcc"]
+    # datasets = ["coco", "vpg", "sbu", "gcc"]
     # batch_size = (
     #     4096  # this is a desired batch size; pl trainer will accumulate gradients when per step batch is smaller.
     # )
@@ -122,7 +122,7 @@ def config():
     #
     save_period = 1
     monitor_mode = 'max'
-    early_stop = 8
+    early_stop = 7
     fp16 = True
     balanced = False
     vis = False
