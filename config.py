@@ -92,18 +92,25 @@ def config():
     save_dir = 'results'
     record_dir = 'records/'
 
+    # region classification
+    region_select_threshold = 0.5  # the threshold used to select the region after sigmoid
+    region_cls = False
+    region_cls_w = 0.5
+    use_mem_r = False
+
+    # region memory setting
+    num_mem = 512
+    topk = 32
+
     # attribute classification setting
     att_cls = False  # attribute classification
     att_cls_w = 0.5
     num_tokens = image_size / 32  # 32 is the downsampling rate for the visual extractor
     output_size = 1
     num_classes = 29  # the number of anatomical locations
-    region_select_threshold = 0.5  # the threshold used to select the region after sigmoid
     att_select_threshold = 0.5
     att_pad_idx = -10000
     region_cls_only = False  # perform region classification in visual extractor
-    region_cls = False
-    region_cls_w = 0.5
     num_attributes = 849  # for one head attribute classification 848 for mimic-split
     use_box_feats = False
 

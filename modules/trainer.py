@@ -352,7 +352,7 @@ class Trainer(BaseTrainer):
                 self.optimizer.zero_grad()
                 with autocast(dtype=torch.float16):
                     # region logits is None when att_cls disabled
-                    output = self.model(batch_dict, mode='train')
+                    output = self.model(batch_dict, split='train')
                     rrg_preds = output['rrg_preds']
                     loss = self.criterion(rrg_preds, batch_dict['text'], batch_dict['mask'])
                     ce_losses.update(loss.item())
@@ -439,7 +439,7 @@ class Trainer(BaseTrainer):
                         region_labels = region_labels[region_masks]
 
                     with autocast(dtype=torch.float16):
-                        output = self.model(batch_dict, mode='sample')
+                        output = self.model(batch_dict, split=split)
 
                         if self.region_cls:
                             region_logits = output['region_logits'][region_masks]
@@ -454,7 +454,7 @@ class Trainer(BaseTrainer):
                                     region_preds = region_probs.cpu()
                                     region_targets = region_labels.cpu()
 
-                        if self.att_cls:
+                        if self.att_cls and split=='test':
                             att_probs_record = output['att_probs_record']
                             attribute_labels = data['attribute_label_dicts']
                             for bs_id in att_probs_record.keys():
@@ -487,7 +487,7 @@ class Trainer(BaseTrainer):
                     # ensure the data in each rank is the same to perform evaluation
                     region_auc = calculate_auc(preds=region_preds.numpy(), targets=region_targets.long().numpy())
                     log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
-                if self.att_cls:
+                if self.att_cls and split == 'test':
                     att_aucs = []
                     for key in attribute_preds.keys():
                         try:
@@ -559,7 +559,7 @@ class Trainer(BaseTrainer):
                         region_labels = region_labels[region_masks]
 
                     with autocast(dtype=torch.float16):
-                        output = self.model(batch_dict, mode='sample')
+                        output = self.model(batch_dict, split='test')
 
                         patch_feats = output['encoded_img_feats']
 

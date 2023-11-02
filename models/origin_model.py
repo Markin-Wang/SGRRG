@@ -106,12 +106,12 @@ class RRGModel(nn.Module):
         patch_feats = self.vision_encoder(patch_feats, att_masks, sg_embed, sg_mask)
         return patch_feats
 
-    def forward(self, batch_dict, return_feats=False, mode='sample'):
+    def forward(self, batch_dict, return_feats=False, split='train'):
 
-        if mode == 'train':
+        if split == 'train':
             return self.forward_train(batch_dict)
 
-        return self.forward_test(batch_dict)
+        return self.forward_test(batch_dict,split)
 
     def forward_train(self, batch_dict):
         images, targets = batch_dict['image'], batch_dict['text']
@@ -155,7 +155,7 @@ class RRGModel(nn.Module):
 
         return return_dicts
 
-    def forward_test(self, batch_dict):
+    def forward_test(self, batch_dict, split='val'):
         images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs = None, None, None, None
         return_dicts = {}
@@ -181,9 +181,10 @@ class RRGModel(nn.Module):
             att_probs_record = defaultdict(dict)
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
             #print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
-            for i in range(len(att_probs)):
-                bs_id, box_category = boxes[i,0].long(),box_labels[i].long()
-                att_probs_record[bs_id.item()][box_category.item()] = att_probs[i].cpu()
+            if split == 'test':
+                for i in range(len(att_probs)):
+                    bs_id, box_category = boxes[i,0].long(),box_labels[i].long()
+                    att_probs_record[bs_id.item()][box_category.item()] = att_probs[i].cpu()
             if self.use_box_feats:
                 patch_feats = box_feats
 
