@@ -3,29 +3,12 @@ import numpy as np
 
 ex = Experiment("FIBER")
 
-
-def _loss_names(d):
-    ret = {
-        "itm": 0,
-        "itc": 0,
-        "mlm": 0,
-        "vqa": 0,
-        "nlvr2": 0,
-        "caption_mle": 0,
-        "caption_gold": 0,
-        "caption_cider": 0,
-    }
-    ret.update(d)
-    return ret
-
-
 @ex.config
 def config():
     exp_name = "fiber"
     seed = 0
     data_dir = 'datasets'
     # datasets = ["coco", "vg", "sbu", "gcc"]
-    loss_names = _loss_names({"itm": 1, "mlm": 1, "itc": 1})
     # batch_size = (
     #     4096  # this is a desired batch size; pl trainer will accumulate gradients when per step batch is smaller.
     # )

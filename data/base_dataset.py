@@ -80,7 +80,8 @@ class BaseDatasetArrow(Dataset):
             if split == 'train':
                 ann_file_path = os.path.join(root, 'annotations', f'box_train.json')
             else:
-                ann_file_path = os.path.join(root, 'annotations', f'box_{split}_dino_th05.json')
+                #ann_file_path = os.path.join(root, 'annotations', f'box_{split}_dino_th05.json')
+                ann_file_path = os.path.join(root, 'annotations', f'box_{split}.json')
             self.box_infos = self.load_box_annotations(ann_file_path)
 
             self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_mhead.json')
@@ -136,7 +137,8 @@ class BaseDatasetArrow(Dataset):
             return_dict.update({'region_labels': region_labels})
 
         if self.att_cls:
-            name = "attribute_labels" if self.split == 'train' else "attribute_label_dicts"
+            # name = "attribute_labels" if self.split == 'train' else "attribute_label_dicts"
+            name = "attribute_labels"
             return_dict.update({name: attribute_labels})
 
         return return_dict
@@ -354,5 +356,5 @@ class BaseDatasetArrow(Dataset):
         return attribute_anns, region_anns
 
     def __len__(self):
-        ratio = 20 if self.split == 'train' else 5
+        ratio = 20 if self.split == 'train' else 10
         return len(self.all_texts) // ratio if self.debug else len(self.all_texts)

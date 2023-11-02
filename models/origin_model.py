@@ -163,7 +163,10 @@ class RRGModel(nn.Module):
         patch_feats, gbl_feats = self.extract_img_feats(images)
         if self.region_cls:
             boxes, box_labels = batch_dict['boxes'], batch_dict['box_labels']
-            region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
+            #region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
+            box_masks = batch_dict['box_masks']
+            region_logits = self.region_selector(gbl_feats, boxes, box_labels, box_masks)
+            region_probs = torch.sigmoid(region_logits)
 
             # boxes_temp = boxes[box_masks]
             # no_box_ids = []
@@ -178,16 +181,19 @@ class RRGModel(nn.Module):
             att_probs_record = defaultdict(dict)
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
             #print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
-            for i in range(len(att_probs)):
-                bs_id, box_category = boxes[i,0].long(),box_labels[i].long()
-                att_probs_record[bs_id.item()][box_category.item()] = att_probs[i].cpu()
-            if self.use_box_feats:
-                patch_feats = box_feats
+            # for i in range(len(att_probs)):
+            #     bs_id, box_category = boxes[i,0].long(),box_labels[i].long()
+            #     att_probs_record[bs_id.item()][box_category.item()] = att_probs[i].cpu()
+            # if self.use_box_feats:
+            #     patch_feats = box_feats
 
         if self.use_sg:
             # boxes, box_labels = boxes[box_masks], box_labels[box_masks]
+            attribute_ids = batch_dict['attribute_ids']
             sg_embeds, sg_masks = self.scene_graph_encoder(boxes, box_feats, box_labels, batch_size=patch_feats.size(0),
-                                                           att_probs=att_probs)
+                                                           att_ids=attribute_ids)
+            # sg_embeds, sg_masks = self.scene_graph_encoder(boxes, box_feats, box_labels, batch_size=patch_feats.size(0),
+            #                                                att_probs=att_probs)
 
         patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
 
