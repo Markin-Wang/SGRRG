@@ -80,8 +80,8 @@ class BaseDatasetArrow(Dataset):
             if split == 'train':
                 ann_file_path = os.path.join(root, 'annotations', f'box_train.json')
             else:
-                #ann_file_path = os.path.join(root, 'annotations', f'box_{split}_dino_th05.json')
-                ann_file_path = os.path.join(root, 'annotations', f'box_{split}.json')
+                ann_file_path = os.path.join(root, 'annotations', f'box_{split}_dino_th05.json')
+                # ann_file_path = os.path.join(root, 'annotations', f'box_{split}.json')
             self.box_infos = self.load_box_annotations(ann_file_path)
 
             self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_mhead.json')
