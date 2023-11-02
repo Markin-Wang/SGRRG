@@ -113,7 +113,8 @@ def config():
     sgade = False # scene graph aided decoder
     num_layers_sgen = 3
     use_region_type_embed = False
-    use_focal_ls = False
+    use_focal_ls_r = False
+    use_focal_ls_a = False
     encode_type = 'oa-c'
     # object-attribute coupled (oa-c): node-att to node-att
     # object-attribute decomposed (oa-d): node to node-att then nodes to nodes
