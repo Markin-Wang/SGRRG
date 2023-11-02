@@ -164,9 +164,9 @@ class RRGModel(nn.Module):
         if self.region_cls:
             boxes, box_labels = batch_dict['boxes'], batch_dict['box_labels']
             #region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
-            box_masks = batch_dict['box_masks']
-            region_logits = self.region_selector(gbl_feats, boxes, box_labels, box_masks)
-            region_probs = torch.sigmoid(region_logits)
+            # box_masks = batch_dict['box_masks']
+            region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
+            # region_probs = torch.sigmoid(region_logits)
 
             # boxes_temp = boxes[box_masks]
             # no_box_ids = []
