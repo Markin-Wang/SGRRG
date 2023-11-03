@@ -90,7 +90,7 @@ class RRGModel(nn.Module):
         return super().__str__() + '\nTrainable parameters: {}'.format(params)
 
     def get_img_feats(self, images, seq):
-        patch_feats, gbl_feats = self.get_img_feats(images)
+        patch_feats = self.get_img_feats(images)
         return self.encode_img_feats(patch_feats, seq)
 
     def get_text_feats(self, text_ids, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None):
@@ -99,8 +99,8 @@ class RRGModel(nn.Module):
         return word_embed
 
     def extract_img_feats(self, images):
-        patch_feats, gbl_feats = self.visual_extractor(images)
-        return patch_feats, gbl_feats
+        patch_feats = self.visual_extractor(images)
+        return patch_feats
 
     def encode_img_feats(self, patch_feats, att_masks, sg_embed=None, sg_mask=None):
         patch_feats = self.vision_encoder(patch_feats, att_masks, sg_embed, sg_mask)
@@ -118,11 +118,11 @@ class RRGModel(nn.Module):
         region_logits, region_probs, att_logits, att_probs, sg_embeds, sg_masks = None, None, None, None, None, None
         return_dicts = {}
 
-        patch_feats, gbl_feats = self.extract_img_feats(images)
+        patch_feats = self.extract_img_feats(images)
 
         if self.region_cls:
             boxes, box_labels, box_masks = batch_dict['boxes'], batch_dict['box_labels'], batch_dict['box_masks']
-            region_logits = self.region_selector(gbl_feats, boxes, box_labels, box_masks)
+            region_logits = self.region_selector(patch_feats, boxes, box_labels, box_masks)
 
         if self.att_cls:
             box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
@@ -160,12 +160,12 @@ class RRGModel(nn.Module):
         region_logits, region_probs, att_logits, att_probs = None, None, None, None
         return_dicts = {}
 
-        patch_feats, gbl_feats = self.extract_img_feats(images)
+        patch_feats = self.extract_img_feats(images)
         if self.region_cls:
             boxes, box_labels = batch_dict['boxes'], batch_dict['box_labels']
             #region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
             # box_masks = batch_dict['box_masks']
-            region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
+            region_logits, region_probs, box_masks = self.region_selector(patch_feats, boxes, box_labels, None)
             # region_probs = torch.sigmoid(region_logits)
 
             # boxes_temp = boxes[box_masks]

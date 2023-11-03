@@ -34,7 +34,7 @@ class VisualExtractor(nn.Module):
             self.model = getattr(swin, config['img_backbone'])(
                 pretrained=True, config=config,
             )
-            self.avgpool = nn.AdaptiveAvgPool1d(1)
+            # self.avgpool = nn.AdaptiveAvgPool1d(1)
             self.num_features = config['d_vf']
 
         elif config['img_backbone'].startswith('resnet'):
@@ -131,7 +131,6 @@ class VisualExtractor(nn.Module):
                 patch_feats, avg_feats = feats[:, 1:, :], feats[:, 0, :]
             elif self.model_name.lower().startswith('swin'):
                 patch_feats = self.model(images)
-                avg_feats = torch.mean(patch_feats, -2)
             elif self.model_name.lower().startswith('resnet'):
                 patch_feats = self.model(images)
                 avg_feats = F.adaptive_avg_pool2d(patch_feats, (1, 1)).squeeze().reshape(-1, patch_feats.size(1))
@@ -156,4 +155,4 @@ class VisualExtractor(nn.Module):
                 return region_logits, torch.sigmoid(region_logits)
             return region_logits
 
-        return patch_feats, avg_feats
+        return patch_feats

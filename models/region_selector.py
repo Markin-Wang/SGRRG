@@ -1,35 +1,43 @@
 import torch.nn as nn
 from modules.utils import init_weights
 import torch
-
+from .vision_encoder import clones
+import math
+import torch.nn.functional as F
 
 class RegionSelector(nn.Module):
     def __init__(self, config):
         super(RegionSelector, self).__init__()
         self.feature_size = config['d_vf']
-
         self.use_mem = config['use_mem_r']
+        self.drop_prob = config['dropout']
         # memory settings
         if self.use_mem:
             self.topk = config['topk']
-            self.cmn = MultiThreadMemory(config['num_heads'], self.feature_size, topk=self.topk)
+            self.cmn = MultiThreadMemory(config['num_heads_r'], self.feature_size, topk=self.topk)
             self.memory = nn.Parameter(torch.FloatTensor(config['num_mem'], self.feature_size))
             self.mem_proj = nn.Linear(self.feature_size, self.feature_size)
-            self.fuse_proj = nn.Linear(self.feature_size * 2, self.feature_size)
-            self.cmn.apply(init_weight)
-            self.memory.apply(init_weights)
-            self.mem_proj.apply(init_weights)
-            self.fuse_proj.apply(init_weights)
-
-        self.drop_prob = config['dropout']
-        self.ff = nn.Sequential(
-            nn.Linear(config['d_vf'], config['d_vf']),
+            self.fuse_proj = nn.Sequential(
+            nn.Linear(config['d_vf'] * 2, config['d_vf']),
             nn.GELU(),
             nn.Dropout(p=self.drop_prob),
         )
+            self.cmn.apply(init_weights)
+            nn.init.normal_(self.memory , 0, 1 / self.feature_size)
+            self.mem_proj.apply(init_weights)
+            self.fuse_proj.apply(init_weights)
+
+        # self.ff = nn.Sequential(
+        #     nn.Linear(config['d_vf'], config['d_vf']),
+        #     nn.GELU(),
+        #     nn.Dropout(p=self.drop_prob),
+        # )
+        self.ff = nn.Linear(config['d_vf'], config['d_vf'])
         self.ff.apply(init_weights)
+
         self.region_head = nn.Linear(config['d_vf'], config['num_classes'])
         self.region_head.apply(init_weights)
+
         self.region_select_threshold = config['region_select_threshold']
 
     def forward(self, x, boxes=None, box_labels=None, box_masks=None):
@@ -37,11 +45,11 @@ class RegionSelector(nn.Module):
 
         if self.use_mem:
             mem = self.mem_proj(self.memory)
-            mem_masks = torch.full((x.size(0), 1, mem.size(0)), 0.0, dtype=x.dtype, device=x.device)
-            responses = self.cmn(x, mem, mem, mem_masks)
+            mem = mem.unsqueeze(0).expand(x.size(0),*mem.shape)
+            responses = self.cmn(x, mem, mem)
             x = self.fuse_proj(torch.cat([x,responses],dim=-1))
 
-
+        x = torch.mean(x, -2)
         logits = self.region_head(x)
 
         if box_masks is not None:
@@ -70,34 +78,44 @@ class MultiThreadMemory(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
         self.topk = topk
 
-    def forward(self, query, key, value, mask=None, layer_past=None):
-        if mask is not None:
-            mask = mask.unsqueeze(1)
+    def forward(self, query, key, value, mask=None):
         nbatches = query.size(0)
 
-        if layer_past is not None and layer_past.shape[2] == key.shape[1] > 1:
-            query = self.linears[0](query)
-            key, value = layer_past[0], layer_past[1]
-            present = torch.stack([key, value])
-        else:
-            query, key, value = \
-                [l(x) for l, x in zip(self.linears, (query, key, value))]
-
-        if layer_past is not None and not (layer_past.shape[2] == key.shape[1] > 1):
-            past_key, past_value = layer_past[0], layer_past[1]
-            key = torch.cat((past_key, key), dim=1)
-            value = torch.cat((past_value, value), dim=1)
-            present = torch.stack([key, value])
+        query, key, value = \
+            [l(x) for l, x in zip(self.linears, (query, key, value))]
 
         query, key, value = \
             [x.view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
              for x in [query, key, value]]
 
-        x, self.attn = memory_querying_responding(query, key, value, mask=mask, dropout=self.dropout, topk=self.topk)
+        x, self.attn = self.memory_querying_responding(query, key, value, mask)
 
         x = x.transpose(1, 2).contiguous() \
             .view(nbatches, -1, self.h * self.d_k)
-        if layer_past is not None:
-            return self.linears[-1](x), present
-        else:
-            return self.linears[-1](x)
+
+        return self.linears[-1](x)
+
+    def memory_querying_responding(self,query, key, value, mask=None):
+        if mask is not None:
+            mask = mask.unsqueeze(1)
+        d_k = query.size(-1)
+        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+        if mask is not None:
+            scores = scores + mask
+
+        selected_scores, idx = scores.topk(self.topk)
+
+        # query [8, 8, 49/98, 64]) value [bs, num_head, num_mem, hs] score [8, 8, 49/98, 2048]
+        # idx 8x8x98x32
+        dummy_value = value.unsqueeze(2).expand(idx.size(0), idx.size(1), idx.size(2), value.size(-2),
+                                                value.size(-1))  # [bs, num_head, num_token, num_mem, hs]
+        dummy_idx = idx.unsqueeze(-1).expand(idx.size(0), idx.size(1), idx.size(2), idx.size(3),
+                                             value.size(-1))  # [bs, num_head, num_token, topk, hs]
+
+        selected_value = torch.gather(dummy_value, 3, dummy_idx)  # [8, 8, 98, 32, 64]
+
+        p_attn = F.softmax(selected_scores, dim=-1)  # [8, 8, 98, 32]
+
+        p_attn = self.dropout(p_attn)
+        return torch.matmul(p_attn.unsqueeze(3), selected_value).squeeze(3), p_attn
+

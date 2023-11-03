@@ -100,7 +100,8 @@ def config():
 
     # region memory setting
     num_mem = 512
-    topk = 32
+    topk = 16
+    num_heads_r = 32
 
     # attribute classification setting
     att_cls = False  # attribute classification
