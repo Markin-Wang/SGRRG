@@ -47,8 +47,9 @@ class RegionSelector(nn.Module):
         if self.use_mem:
             x = x.unsqueeze(1)
             mem = self.mem_proj(self.memory)
-            mem = mem.unsqueeze(0).expand(x.size(0),*mem.shape)
-            responses = self.cmn(x, mem, mem)
+            #mem = mem.unsqueeze(0).expand(x.size(0),*mem.shape)
+            # can broadcast in batch dimension
+            responses = self.cmn(x, mem.unsqueeze(0), mem.unsqueeze(0))
             x = self.fuse_proj(torch.cat([x,responses],dim=-1))
             x = x.squeeze(1)
 
