@@ -41,15 +41,17 @@ class RegionSelector(nn.Module):
         self.region_select_threshold = config['region_select_threshold']
 
     def forward(self, x, boxes=None, box_labels=None, box_masks=None):
+        x = torch.mean(x, -2)
         x = self.ff(x)
 
         if self.use_mem:
+            x = x.unsqueeze(1)
             mem = self.mem_proj(self.memory)
             mem = mem.unsqueeze(0).expand(x.size(0),*mem.shape)
             responses = self.cmn(x, mem, mem)
             x = self.fuse_proj(torch.cat([x,responses],dim=-1))
+            x = x.squeeze(1)
 
-        x = torch.mean(x, -2)
         logits = self.region_head(x)
 
         if box_masks is not None:
