@@ -87,9 +87,12 @@ class MultiThreadMemory(nn.Module):
         query, key, value = \
             [l(x) for l, x in zip(self.linears, (query, key, value))]
 
-        query, key, value = \
-            [x.view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-             for x in [query, key, value]]
+        # query, key, value = \
+        #     [x.view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+        #      for x in [query, key, value]]
+        query = query.view(query.size(0), -1, self.h, self.d_k).transpose(1, 2)
+        key = key.view(key.size(0), -1, self.h, self.d_k).transpose(1, 2)
+        value = value.view(value.size(0), -1, self.h, self.d_k).transpose(1, 2)
 
         x, self.attn = self.memory_querying_responding(query, key, value, mask)
 
@@ -103,6 +106,7 @@ class MultiThreadMemory(nn.Module):
             mask = mask.unsqueeze(1)
         d_k = query.size(-1)
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+
         if mask is not None:
             scores = scores + mask
 
