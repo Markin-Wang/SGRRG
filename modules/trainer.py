@@ -18,7 +18,8 @@ from modules.beam_search import BeamSearch
 from modules.loss import AsymmetricLoss, AsymmetricLossOptimized
 from collections import defaultdict
 from config import cgnome_id2cat, categories
-
+import json
+import glob
 
 # from modules.utils import get_grad_norm
 # import torch.distributed as dist
@@ -255,6 +256,7 @@ class BaseTrainer(object):
         return device, list_ids
 
     def _save_checkpoint(self, epoch, save_best=False):
+        if not save_best: return
         state = {
             'epoch': epoch,
             'state_dict': self.model.module.state_dict(),
@@ -266,14 +268,14 @@ class BaseTrainer(object):
             'monitor_test_best': self.mnt_test_best,
             'best_epoch': self.best_epoch,
         }
-        filename = os.path.join(self.checkpoint_dir, 'current_checkpoint.pth')
+        filename = os.path.join(self.checkpoint_dir, 'model_best.pth')
         # filename = os.path.join(self.checkpoint_dir, 'checkpoint'+str(epoch)+'.pth')
         torch.save(state, filename)
         print("Saving checkpoint: {} ...".format(filename))
-        if save_best:
-            best_path = os.path.join(self.checkpoint_dir, 'model_best.pth')
-            torch.save(state, best_path)
-            print("Saving current best: model_best.pth ...")
+        # if save_best:
+        #     best_path = os.path.join(self.checkpoint_dir, 'model_best.pth')
+        #     torch.save(state, best_path)
+        #     print("Saving current best: model_best.pth ...")
 
     def _resume_checkpoint(self, resume_path):
         resume_file = auto_resume_helper(resume_path)
@@ -542,101 +544,132 @@ class Trainer(BaseTrainer):
         dataloader = self.val_dataloader if split == 'val' else self.test_dataloader
         device = self.model.device
         region_preds, region_targets = [], []
-        val_gts, val_res = [], []
+        # attribute_preds, attribute_targets = [], []
         img_ids = []
-        no_boxes_ids = []
+        attribute_preds, attribute_targets = defaultdict(list), defaultdict(list)
 
         with tqdm(desc=f'Epoch %d - {split}' % epoch, unit='it', total=len(dataloader),
                   disable=dist.get_rank() != self.local_rank) as pbar:
             with torch.no_grad():
+                val_gts, val_res = [], []
                 for batch_idx, data in enumerate(dataloader):
                     batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if
                                   key in self.keys}
-                    batch_dict['img_id'] = data['img_id']
                     if self.region_cls:
+                        # boxes, box_labels, region_labels = data['boxes'].to(device, non_blocking=True), \
+                        #                                    data['box_labels'].to(device, non_blocking=True), \
+                        #                                    data['region_labels'].to(device, non_blocking=True)
                         region_labels = batch_dict['region_labels']
-                        region_masks = get_region_mask(region_labels).cpu()
+                        region_masks = get_region_mask(region_labels)
                         region_labels = region_labels[region_masks]
 
                     with autocast(dtype=torch.float16):
-                        output = self.model(batch_dict, split='test')
-
-                        patch_feats = output['encoded_img_feats']
+                        output = self.model(batch_dict, split=split)
 
                         if self.region_cls:
                             region_logits = output['region_logits'][region_masks]
                             region_probs = output['region_probs'][region_masks]
-                            no_boxes_ids.extend(output['no_box_ids'])
                             if len(region_labels) > 0:
                                 val_region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
                                 val_region_cls_losses.update(val_region_cls_loss.item())
                                 if len(region_preds) > 0:
-                                    region_preds = torch.cat((region_preds, region_probs), dim=0)
-                                    region_targets = torch.cat((region_targets, region_labels), dim=0)
+                                    region_preds = torch.cat((region_preds, region_probs.cpu()), dim=0)
+                                    region_targets = torch.cat((region_targets, region_labels.cpu()), dim=0)
                                 else:
-                                    region_preds = region_probs
-                                    region_targets = region_labels
+                                    region_preds = region_probs.cpu()
+                                    region_targets = region_labels.cpu()
 
+                        if self.att_cls and split == 'test':
+                            att_probs_record = output['att_probs_record']
+                            attribute_labels = data['attribute_label_dicts']
+                            for bs_id in att_probs_record.keys():
+                                for box_label in att_probs_record[bs_id]:
+                                    if box_label in attribute_labels[bs_id]:
+                                        attribute_preds[box_label].append(
+                                            att_probs_record[bs_id][box_label][:cgnome_id2cat[box_label]].unsqueeze(0))
+                                        attribute_targets[box_label].append(
+                                            attribute_labels[bs_id][box_label])
                         if self.use_new_bs:
-                            output = self.beam_search.caption_test_step(self.model.module, image_embeds=patch_feats)
+                            output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
                         else:
-                            output = self.beam_search.sample(self.model.module, patch_feats=patch_feats)
-
-                    reports = self.tokenizer.decode_batch(output['preds'].numpy())
-                    ground_truths = self.tokenizer.decode_batch(batch_dict['text'][:, 1:].cpu().numpy())
-                    val_res.extend(reports)
-                    val_gts.extend(ground_truths)
+                            output = self.beam_search.sample(self.model.module, patch_feats=output['encoded_img_feats'])
                     img_ids.extend(data['img_id'])
+                    val_res.append(output['preds'])
+                    val_gts.append(self._pad(batch_dict['text'][:, 1:]))
                     memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
 
+
                     pbar.update()
+
+                if self.region_cls:
+                    # ensure the data in each rank is the same to perform evaluation
+                    region_auc = calculate_auc(preds=region_preds.numpy(), targets=region_targets.long().numpy())
+                    log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
+                if self.att_cls and split == 'test':
+                    att_aucs = []
+                    for key in attribute_preds.keys():
+                        try:
+                            att_preds, att_gts = torch.cat(attribute_preds[key], dim=0), torch.cat(
+                                attribute_targets[key], dim=0)
+                            column_sum = att_gts.sum(dim=0)
+                            selected_column_ids = column_sum != 0
+                            # print(f'{selected_column_ids.sum()} out of {selected_column_ids.shape[0]} categories selected.')
+                            att_preds, att_gts = att_preds[:, selected_column_ids], att_gts[:, selected_column_ids]
+                            att_auc = calculate_auc(preds=att_preds.numpy(),
+                                                    targets=att_gts.long().numpy())
+                            att_aucs.append(att_auc)
+                        except  ValueError:
+                            self.logger.info(f'Att calculation on category {categories[key]} fails.')
+                            continue
+                    att_auc = np.mean(att_aucs) if att_aucs else 0
+                    log.update({f'{split}_att_auc': att_auc})
+
+                val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
+                # ensure the data in each rank is the same to perform evaluation
+                val_res, val_gts = gather_preds_and_gts(val_res, val_gts)
+                val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
+                val_res, val_gts = self.tokenizer.decode_batch(val_res.cpu().numpy()), self.tokenizer.decode_batch(
+                    val_gts.cpu().numpy())
                 val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},
                                            {i: [re] for i, re in enumerate(val_res)})
                 log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
-                if split == 'val':
-                    log.update({'val_ce_loss': val_ce_losses.avg})
-                if self.region_cls:
-                    region_auc = calculate_auc(preds=region_preds, targets=region_targets)
-                    log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
-                # if self.att_cls:
-                #     att_auc = calculate_auc(preds=attribute_preds, targets=attribute_targets)
-                #     log.update({f'{split}_att_auc': region_auc, f"{split}_att_loss": val_att_cls_losses.avg})
+
         self.logger.info('The result for the best performed models in test set.')
         for key, value in log.items():
             self.logger.info('\t{:15s}: {}'.format(str(key), value))
 
         rank = torch.distributed.get_rank()
         data = (img_ids, val_res, val_gts)
-        save_data = []
-        save_data.append(log)
-        save_data.append(no_boxes_ids)
-        no_boxes_ids = set(no_boxes_ids)
-        no_boxes_pred, no_boxes_gt, no_box_ids = [], [], []
-
-        with_boxes_pred, with_boxes_gt, with_boxes_ids = [], [], []
-        for i in range(len(img_ids)):
-            if img_ids[i] in no_boxes_ids:
-                no_box_ids.append(img_ids[i])
-                no_boxes_pred.append(val_res[i])
-                no_boxes_gt.append(val_gts[i])
-            else:
-                with_boxes_ids.append(img_ids[i])
-                with_boxes_pred.append(val_res[i])
-                with_boxes_gt.append(val_gts[i])
-
-        val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(no_boxes_gt)},
-                                   {i: [re] for i, re in enumerate(no_boxes_pred)})
-
-        self.logger.info(f'The result for the best performed models in no boxes set ({len(no_box_ids)} samples).')
-        for key, value in val_met.items():
-            self.logger.info('\t{:15s}: {}'.format(str(key), value))
-
-        val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(with_boxes_gt)},
-                                   {i: [re] for i, re in enumerate(with_boxes_pred)})
-
-        self.logger.info(f'The result for the best performed models in with boxes set ({len(with_boxes_ids)} samples).')
-        for key, value in val_met.items():
-            self.logger.info('\t{:15s}: {}'.format(str(key), value))
+        save_data = [{'img_id':img_id,'pred':pred,'gt':gt} for img_id, pred, gt in zip(*data)]
+        save_data = [log] + save_data
+        # save_data.append(no_boxes_ids)
+        # no_boxes_ids = set(no_boxes_ids)
+        # no_boxes_pred, no_boxes_gt, no_box_ids = [], [], []
+        #
+        # with_boxes_pred, with_boxes_gt, with_boxes_ids = [], [], []
+        # for i in range(len(img_ids)):
+        #     if img_ids[i] in no_boxes_ids:
+        #         no_box_ids.append(img_ids[i])
+        #         no_boxes_pred.append(val_res[i])
+        #         no_boxes_gt.append(val_gts[i])
+        #     else:
+        #         with_boxes_ids.append(img_ids[i])
+        #         with_boxes_pred.append(val_res[i])
+        #         with_boxes_gt.append(val_gts[i])
+        #
+        # val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(no_boxes_gt)},
+        #                            {i: [re] for i, re in enumerate(no_boxes_pred)})
+        #
+        # self.logger.info(f'The result for the best performed models in no boxes set ({len(no_box_ids)} samples).')
+        # for key, value in val_met.items():
+        #     self.logger.info('\t{:15s}: {}'.format(str(key), value))
+        #
+        # val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(with_boxes_gt)},
+        #                            {i: [re] for i, re in enumerate(with_boxes_pred)})
+        #
+        # self.logger.info(f'The result for the best performed models in with boxes set ({len(with_boxes_ids)} samples).')
+        # for key, value in val_met.items():
+        #     self.logger.info('\t{:15s}: {}'.format(str(key), value))
 
         # for i in tqdm(range(len(img_ids))):
         #     img_id, pred, gt = img_ids[i], val_res[i], val_gts[i]
@@ -644,22 +677,22 @@ class Trainer(BaseTrainer):
         #     eval_res = self.metric_ftns({0: [gt]}, {0: [pred]})
         #
         #     save_data.append({'img_id': img_id, 'pred': pred, 'gt': gt, 'score': eval_res})
-        # with open(f'caption_{rank}.json', 'w') as f:
-        #     json.dump(save_data, f)
-        #
-        # save_path = save_dir
-        # torch.distributed.barrier()
-        # if rank == 0:
-        #     jsons = list()
-        #     paths = list(glob.glob("caption_*.json"))
-        #     for path in paths:
-        #         with open(path, "r") as fp:
-        #             jsons += json.load(fp)
-        #     os.makedirs(save_path, exist_ok=True)
-        #     with open(f"{save_path}/caption_data.json", "w") as fp:
-        #         json.dump(jsons, fp, indent=4)
-        # torch.distributed.barrier()
-        # self.logger.info(f'Save prediction in directory {save_path}.')
-        # os.remove(f"caption_{rank}.json")
+        with open(f'caption_{rank}.json', 'w') as f:
+            json.dump(save_data, f)
+
+        save_path = save_dir
+        torch.distributed.barrier()
+        if rank == 0:
+            jsons = list()
+            paths = list(glob.glob("caption_*.json"))
+            for path in paths:
+                with open(path, "r") as fp:
+                    jsons += json.load(fp)
+            os.makedirs(save_path, exist_ok=True)
+            with open(f"{save_path}/caption_data.json", "w") as fp:
+                json.dump(jsons, fp, indent=4)
+        torch.distributed.barrier()
+        self.logger.info(f'Save prediction in directory {save_path}.')
+        os.remove(f"caption_{rank}.json")
 
         return log

@@ -8,7 +8,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from modules.forebacklearning import ForeBackLearning
 from torch.cuda.amp import GradScaler, autocast, custom_fwd, custom_bwd
 from math import inf
 from timm.models.layers import trunc_normal_, to_2tuple

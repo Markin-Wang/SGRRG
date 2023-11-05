@@ -9,7 +9,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from modules.forebacklearning import ForeBackLearning
 from torch.cuda.amp import GradScaler, autocast, custom_fwd, custom_bwd
 from math import inf
 from timm.models.layers import trunc_normal_, to_2tuple
@@ -67,20 +66,25 @@ class SceneGraphAidedEncoderLayer(nn.Module):
         self.pe = config['pe']
         self.d_ff = config['d_ff']
         self.dropout = config['dropout']
-
+        self.fuse_opt = config['fuse_opt']
+        if self.fuse_opt == 'cat':
+            self.fuse_proj = nn.Linear(self.d_model*2,self.d_model)
         self.self_attn = MultiHeadedAttention(self.num_heads, self.d_model, use_rpe=self.pe == 'rpe')
         self.cross_attn = MultiHeadedAttention(self.num_heads, self.d_model)
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 3)
 
-    def forward(self, x, self_mask, sg_embed, cross_mask):
+    def forward(self, x, self_mask, sg_embeds, cross_mask):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
-        # cross_mask bs x 1 x len_sg
         selected_bs = (cross_mask.squeeze(1) == 0).sum(-1) != 0
-        # print(cross_mask[0])
-        x[selected_bs] = self.sublayer[1](x[selected_bs],
-                                          lambda x: self.cross_attn(x, sg_embed[selected_bs], sg_embed[selected_bs],
-                                                                    cross_mask[selected_bs]))
+        # cross_mask bs x 1 x len_sg
+        x_, sg_embeds_, cross_mask_ = x[selected_bs], sg_embeds[selected_bs], cross_mask[selected_bs]
+        x_ = self.sublayer[1](x_, lambda x: self.cross_attn(x, sg_embeds_, sg_embeds_,cross_mask_))
+        if self.fuse_opt == 'att':
+            x[selected_bs] = x_
+        elif self.fuse_opt == 'cat':
+            x[selected_bs] = self.fuse_proj(torch.cat([x[selected_bs],x_],dim=-1)).to(dtype=x.dtype) # fp16 to fp32
+
         return self.sublayer[2](x, self.feed_forward), self.cross_attn.attn
 
 

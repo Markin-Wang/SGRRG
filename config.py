@@ -45,11 +45,11 @@ def config():
     eos_idx = 0
     pad_idx = 0
     use_bn = 0
-    drop_prob_lm = 0.5
+    drop_prob_lm = 0.2
 
     # Beam Search
     sample_method = 'beam_search'
-    use_new_bs = False
+    use_new_bs = True
     beam_size = 3
     temperature = 1.0
     sample_n = 1
@@ -119,6 +119,7 @@ def config():
     use_sg = False
     sgave = False # scene graph aided vision encoder
     sgade = False # scene graph aided decoder
+    fuse_opt = 'att'
     num_layers_sgen = 3
     use_region_type_embed = False
     use_focal_ls_r = False

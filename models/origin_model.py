@@ -6,9 +6,7 @@ from .visual_extractor import VisualExtractor
 # from modules.my_encoder_decoder import EncoderDecoder as r2gen
 from modules.standard_trans import EncoderDecoder as st_trans
 # from modules.trans_both import EncoderDecoder as st_trans
-from modules.cam_attn_con import CamAttnCon
 from modules.my_encoder_decoder import LayerNorm
-from modules.old_forebacklearning import ForeBackLearning
 from modules.utils import load_ape
 from modules.standard_trans import subsequent_mask
 from modules.utils import init_weights, init_weights_origin

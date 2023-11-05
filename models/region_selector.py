@@ -26,8 +26,8 @@ class RegionSelector(nn.Module):
             nn.init.normal_(self.memory , 0, 1 / self.feature_size)
             self.mem_proj.apply(init_weights)
             self.fuse_proj.apply(init_weights)
-            self.ff = nn.Linear(config['d_vf'], config['d_vf'])
-            self.ff.apply(init_weights)
+            # self.ff = nn.Linear(config['d_vf'], config['d_vf'])
+            # self.ff.apply(init_weights)
         # else:
         #     self.ff = nn.Sequential(
         #         nn.Linear(config['d_vf'], config['d_vf']),
@@ -46,7 +46,7 @@ class RegionSelector(nn.Module):
         x = torch.mean(x, -2)
 
         if self.use_mem:
-            x = self.ff(x)
+            # x = self.ff(x)
             x = x.unsqueeze(1)
             mem = self.mem_proj(self.memory)
             #mem = mem.unsqueeze(0).expand(x.size(0),*mem.shape)
