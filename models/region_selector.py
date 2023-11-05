@@ -14,6 +14,9 @@ class RegionSelector(nn.Module):
         # memory settings
         if self.use_mem:
             self.topk = config['topk']
+            self.ff = nn.Linear(config['d_vf'], config['d_vf'])
+            self.ff.apply(init_weights)
+
             self.cmn = MultiThreadMemory(config['num_heads_r'], self.feature_size, topk=self.topk)
             self.memory = nn.Parameter(torch.FloatTensor(config['num_mem'], self.feature_size))
             self.mem_proj = nn.Linear(self.feature_size, self.feature_size)
@@ -26,8 +29,6 @@ class RegionSelector(nn.Module):
             nn.init.normal_(self.memory , 0, 1 / self.feature_size)
             self.mem_proj.apply(init_weights)
             self.fuse_proj.apply(init_weights)
-            self.ff = nn.Linear(config['d_vf'], config['d_vf'])
-            self.ff.apply(init_weights)
         # else:
         #     self.ff = nn.Sequential(
         #         nn.Linear(config['d_vf'], config['d_vf']),
