@@ -141,7 +141,7 @@ def main(_config):
     # build trainer and start to train
     trainer = Trainer(model, criterion, metrics, optimizer, lr_scheduler, dm, writer, logger, _config)
     save_dir = os.path.join(*_config['load_path'].split('/')[:-1])
-    trainer.test_and_save(split='test',save_dir=save_dir)
+    trainer.test(save_dir=save_dir)
 
     # if _config["test_after"]:
     #
