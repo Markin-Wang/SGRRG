@@ -3,6 +3,36 @@ from pycocoevalcap.meteor import Meteor
 from pycocoevalcap.rouge import Rouge
 from pycocoevalcap.cider.cider import Cider
 
+class CaptionScorer:
+    def __init__(self, all_texts):
+        self.scorers = [
+        (Bleu(4), ["BLEU_1", "BLEU_2", "BLEU_3", "BLEU_4"]),
+        (Meteor(), "METEOR"),
+        (Rouge(), "ROUGE_L"),
+        (Cider(all_texts), "Cider")
+    ]
+
+
+    def __call__(self, gts, res):
+        """
+        Performs the MS COCO evaluation using the Python 3 implementation (https://github.com/salaniz/pycocoevalcap)
+
+        :param gts: Dictionary with the image ids and their gold captions,
+        :param res: Dictionary with the image ids ant their generated captions
+        :print: Evaluation score (the mean of the scores of all the instances) for each measure
+        """
+        eval_res = {}
+        for scorer, method in self.scorers:
+            try:
+                score, scores = scorer.compute_score(gts, res, verbose=0)
+            except TypeError:
+                score, scores = scorer.compute_score(gts, res)
+            if type(method) == list:
+                for sc, m in zip(score, method):
+                    eval_res[m] = sc
+            else:
+                eval_res[method] = score
+        return eval_res
 
 def compute_scores(gts, res):
     """

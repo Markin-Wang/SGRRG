@@ -51,12 +51,6 @@ def config():
     sample_method = 'beam_search'
     use_new_bs = True
     beam_size = 3
-    temperature = 1.0
-    sample_n = 1
-    group_size = 1
-    diversity_lambda = 0.5
-    length_penalty = ''
-    suppress_UNK = 0
 
     # learning schedule
     scale_lr = False
@@ -143,7 +137,6 @@ def config():
     encode_text = False
     num_layers_ten = 0
 
-    cfg = 'configs/swin_tiny_patch4_window7_224.yaml'
     local_rank = 0
     load_path = ''
 

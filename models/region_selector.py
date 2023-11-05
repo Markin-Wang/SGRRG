@@ -11,6 +11,7 @@ class RegionSelector(nn.Module):
         self.feature_size = config['d_vf']
         self.use_mem = config['use_mem_r']
         self.drop_prob = config['dropout']
+        self.fuse_opt = config['fuse_opt']
         # memory settings
         if self.use_mem:
             self.topk = config['topk']

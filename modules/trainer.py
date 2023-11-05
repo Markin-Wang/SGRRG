@@ -470,20 +470,20 @@ class Trainer(BaseTrainer):
                             output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
                         else:
                             output = self.beam_search.sample(self.model.module, patch_feats=output['encoded_img_feats'])
-                    val_res.append(output['preds'])
-                    val_gts.append(self._pad(batch_dict['text'][:, 1:]))
-                    # reports = self.tokenizer.decode_batch(output['preds'].numpy())
-                    # ground_truths = self.tokenizer.decode_batch(batch_dict['text'][:, 1:].cpu().numpy())
-                    # val_res.extend(reports)
-                    # val_gts.extend(ground_truths)
+
+                    if split == 'test':
+                        val_res.append(output['preds'])
+                        val_gts.append(self._pad(batch_dict['text'][:, 1:]))
+                    else:
+                        reports = self.tokenizer.decode_batch(output['preds'].cpu().numpy())
+                        ground_truths = self.tokenizer.decode_batch(batch_dict['text'][:, 1:].cpu().numpy())
+                        val_res.extend(reports)
+                        val_gts.extend(ground_truths)
+
                     memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
-                    # pbar.set_postfix(ce_ls=val_ce_losses / (batch_idx + 1), cls_ls=val_img_cls_losses / (batch_idx + 1),
-                    #                  mse_ls=val_mse_losses / (batch_idx + 1), mem=f'mem {memory_used:.0f}MB')
 
+                    pbar.set_postfix(mem=f'mem {memory_used:.0f}MB')
                     pbar.update()
-
-                if split == 'val':
-                    log.update({'val_ce_loss': val_ce_losses.avg})
 
                 if self.region_cls:
                     # ensure the data in each rank is the same to perform evaluation
@@ -508,12 +508,16 @@ class Trainer(BaseTrainer):
                     att_auc = np.mean(att_aucs) if att_aucs else 0
                     log.update({f'{split}_att_auc': att_auc})
 
-                val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
                 # ensure the data in each rank is the same to perform evaluation
-                val_res, val_gts = gather_preds_and_gts(val_res, val_gts)
-                val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
-                val_res, val_gts = self.tokenizer.decode_batch(val_res.cpu().numpy()), self.tokenizer.decode_batch(
-                    val_gts.cpu().numpy())
+                if split == 'test':
+                    # syncronize data from different split to ensure 100% correct calculation in test set
+                    # valid set may have slight difference in multi-gpu training due to the average among all gpus
+                    val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
+                    val_res, val_gts = gather_preds_and_gts(val_res, val_gts)
+                    val_res, val_gts = torch.cat(val_res, dim=0), torch.cat(val_gts, dim=0)
+                    val_res, val_gts = self.tokenizer.decode_batch(val_res.cpu().numpy()), self.tokenizer.decode_batch(
+                        val_gts.cpu().numpy())
+
                 val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},
                                            {i: [re] for i, re in enumerate(val_res)})
                 log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
