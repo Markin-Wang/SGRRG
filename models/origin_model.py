@@ -157,6 +157,7 @@ class RRGModel(nn.Module):
         images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs = None, None, None, None
         return_dicts = {}
+        att_probs_record = defaultdict(dict)
 
         patch_feats = self.extract_img_feats(images)
         if self.region_cls:
@@ -176,7 +177,6 @@ class RRGModel(nn.Module):
         if self.att_cls:
             box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
             att_probs = torch.sigmoid(att_logits)
-            att_probs_record = defaultdict(dict)
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
             #print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
             if split == 'test':
