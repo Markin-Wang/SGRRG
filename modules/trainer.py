@@ -147,6 +147,7 @@ class BaseTrainer(object):
                 if not self.test_after:
                     log.update(self._valid(epoch, 'test')[0])
                 # save logged informations into log dict
+                log = self._synchronize_data(log)
                 # synchronize log in different gpu
                 # self.logger.info('Evaluation completed.')
                 # log = self._broadcast_data(log)
@@ -540,7 +541,7 @@ class Trainer(BaseTrainer):
         for key, value in log.items():
             self.logger.info('\t{:15s}: {}'.format(str(key), value))
         save_dir = self.checkpoint_dir if len(save_dir)==0 else save_dir
-        self.save_caption(val_res,val_gts,img_ids,log,save_dir=self.checkpoint_dir)
+        self.save_caption(val_res,val_gts,img_ids,log,save_dir=save_dir)
 
 
     def save_caption(self, val_res,val_gts,img_ids,log, save_dir=''):

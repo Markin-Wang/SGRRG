@@ -29,6 +29,7 @@ class RRGModel(nn.Module):
         self.att_cls = config['att_cls']
         self.region_cls = config['region_cls']
         self.use_box_feats = config['use_box_feats']
+        self.use_obj_embeds = config['use_obj_embeds']
         self.use_sg = config['use_sg']
         self.sgave = config['sgave']
         self.sgade = config['sgade']
@@ -109,7 +110,7 @@ class RRGModel(nn.Module):
         if split == 'train':
             return self.forward_train(batch_dict)
 
-        return self.forward_test(batch_dict,split)
+        return self.forward_test(batch_dict, split)
 
     def forward_train(self, batch_dict):
         images, targets = batch_dict['image'], batch_dict['text']
@@ -130,14 +131,18 @@ class RRGModel(nn.Module):
         if self.use_sg:
             attribute_ids = batch_dict['attribute_ids']
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
-            sg_embeds, sg_masks = self.scene_graph_encoder(boxes, box_feats, box_labels, batch_size=patch_feats.size(0),
-                                                           att_ids=attribute_ids)
+            sg_embeds, sg_masks, obj_embeds, obj_masks = self.scene_graph_encoder(boxes, box_feats, box_labels,
+                                                                                  batch_size=patch_feats.size(0),
+                                                                                  att_ids=attribute_ids)
 
         # obtain seq mask, should generated in dataloader
         patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
 
         if self.sgave:
-            patch_feats = self.encode_img_feats(patch_feats, att_masks, sg_embeds, sg_masks)
+            if self.use_obj_embeds:
+                patch_feats = self.encode_img_feats(patch_feats, att_masks, obj_embeds, obj_masks)
+            else:
+                patch_feats = self.encode_img_feats(patch_feats, att_masks, sg_embeds, sg_masks)
         else:
             patch_feats = self.encode_img_feats(patch_feats, att_masks)
 
@@ -162,7 +167,7 @@ class RRGModel(nn.Module):
         patch_feats = self.extract_img_feats(images)
         if self.region_cls:
             boxes, box_labels = batch_dict['boxes'], batch_dict['box_labels']
-            #region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
+            # region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
             # box_masks = batch_dict['box_masks']
             region_logits, region_probs, box_masks = self.region_selector(patch_feats, boxes, box_labels, None)
             # region_probs = torch.sigmoid(region_logits)
@@ -178,10 +183,10 @@ class RRGModel(nn.Module):
             box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
             att_probs = torch.sigmoid(att_logits)
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
-            #print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
+            # print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
             if split == 'test':
                 for i in range(len(att_probs)):
-                    bs_id, box_category = boxes[i,0].long(),box_labels[i].long()
+                    bs_id, box_category = boxes[i, 0].long(), box_labels[i].long()
                     att_probs_record[bs_id.item()][box_category.item()] = att_probs[i].cpu()
             if self.use_box_feats:
                 patch_feats = box_feats
@@ -191,14 +196,18 @@ class RRGModel(nn.Module):
             # attribute_ids = batch_dict['attribute_ids']
             # sg_embeds, sg_masks = self.scene_graph_encoder(boxes, box_feats, box_labels, batch_size=patch_feats.size(0),
             #                                                att_ids=attribute_ids)
-            sg_embeds, sg_masks = self.scene_graph_encoder(boxes, box_feats, box_labels, batch_size=patch_feats.size(0),
-                                                           att_probs=att_probs)
+            sg_embeds, sg_masks, obj_embeds, obj_masks = self.scene_graph_encoder(boxes, box_feats, box_labels,
+                                                                                  batch_size=patch_feats.size(0),
+                                                                                  att_probs=att_probs)
 
         patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
 
         if self.sgave:
             assert self.use_sg
-            patch_feats = self.encode_img_feats(patch_feats, att_masks, sg_embeds, sg_masks)
+            if self.use_obj_embeds:
+                patch_feats = self.encode_img_feats(patch_feats, att_masks, obj_embeds, obj_masks)
+            else:
+                patch_feats = self.encode_img_feats(patch_feats, att_masks, sg_embeds, sg_masks)
         else:
             patch_feats = self.encode_img_feats(patch_feats, att_masks)
 
@@ -206,9 +215,9 @@ class RRGModel(nn.Module):
                              'region_logits': region_logits,
                              'region_probs': region_probs,
                              'att_probs_record': att_probs_record,
-                             #'no_box_ids': no_box_ids,
+                             # 'no_box_ids': no_box_ids,
                              'sg_embeds': sg_embeds if self.sgade else None,
-                             'sg_masks':sg_masks if self.sgade else None,
+                             'sg_masks': sg_masks if self.sgade else None,
                              })
 
         return return_dicts
@@ -238,7 +247,7 @@ class RRGModel(nn.Module):
             patch_feats.device)  # use add attention instead of filling
         self_masks = self_masks + sub_mask
 
-        out, attns = self.get_text_feats(text_ids, patch_feats, self_masks, cross_masks,sg_embeds,sg_masks)
+        out, attns = self.get_text_feats(text_ids, patch_feats, self_masks, cross_masks, sg_embeds, sg_masks)
 
         return out
 

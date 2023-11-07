@@ -8,8 +8,10 @@ import torch
 import math
 import torch.nn.functional as F
 
+
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
+
 
 class SceneGraphEncoder(nn.Module):
     def __init__(self, config):
@@ -28,6 +30,7 @@ class SceneGraphEncoder(nn.Module):
         self.att_pad_idx = config['att_pad_idx']
         self.use_region_type_embed = config['use_region_type_embed']
         self.encode_type = config['encode_type']
+        self.use_obj_embeds = config['use_obj_embeds']
         self.zero_count = 0
         self.zero_att_count = 0
         self.all_box_count = 0
@@ -52,12 +55,9 @@ class SceneGraphEncoder(nn.Module):
                                           padding_idx=self.num_attributes)  # the last one is for the mask
         self.att_embedding.apply(init_weights)
 
-
         self.catid2attrange = catid2attrange
 
-        #self.obj_norm = nn.BatchNorm1d(self.hidden_size)
-
-
+        # self.obj_norm = nn.BatchNorm1d(self.hidden_size)
 
         self.sg_encoder = SGEncoder(config)
         self.sg_encoder.apply(init_weights)
@@ -66,14 +66,13 @@ class SceneGraphEncoder(nn.Module):
         # for i in range(attribute_masks.shape[0]):
         #     attribute_masks[i, self.catid2attrange[i][0]:self.catid2attrange[i][1] + 1] = True
 
-        attribute_masks = torch.full((self.num_classes, self.max_att),False)
+        attribute_masks = torch.full((self.num_classes, self.max_att), False)
         for i in range(attribute_masks.shape[0]):
             attribute_masks[i, :id2cat[i]] = True
 
         self.register_buffer(
             "attribute_masks", attribute_masks, persistent=False
         )
-
 
     def forward(self, boxes, box_feats, box_labels, batch_size, att_ids=None, att_probs=None):
         # for one head
@@ -118,7 +117,7 @@ class SceneGraphEncoder(nn.Module):
         # att_embed = self.pre_dropout(att_embed)
 
         obj_embeds = self.proj(box_feats) + self.token_type_embeddings(obj_type)
-        #obj_embeds = self.obj_norm(obj_embeds)
+        # obj_embeds = self.obj_norm(obj_embeds)
         obj_embeds = obj_embeds.unsqueeze(1)
         obj_masks = torch.full((obj_embeds.shape[0], 1), 0.0, device=obj_embeds.device)
 
@@ -129,21 +128,21 @@ class SceneGraphEncoder(nn.Module):
         elif self.encode_type.startswith('oa-d'):
             node_embeds = torch.cat((obj_embeds, att_embed), dim=1)
             node_masks = torch.cat((obj_masks, att_masks), dim=1).unsqueeze(1)  # [bs,1,L]
-            sg_embeds = self.sg_encoder(node_embeds,node_masks,boxes[:,0])
-        elif self.encode_type== 'oa-dc':
-            sg_embeds = self.sg_encoder(obj_embeds,obj_masks,att_embed,att_masks)
+            sg_embeds = self.sg_encoder(node_embeds, node_masks, boxes[:, 0])
+        elif self.encode_type == 'oa-dc':
+            node_masks = None
+            sg_embeds = self.sg_encoder(obj_embeds, obj_masks, att_embed, att_masks)
         else:
             raise NotImplementedError
 
+        sg_embeds, sg_masks, obj_embeds, obj_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks, batch_size)
 
-        sg_embeds, sg_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks, batch_size)
-
-        return sg_embeds, sg_masks
+        return sg_embeds, sg_masks, obj_embeds, obj_masks
 
     def _prepare_att(self, att_labels):
         max_len = max(torch.sum(att_labels, dim=1))
         bs = att_labels.shape[0]
-        att_ids = torch.full((bs, max_len), self.att_pad_idx, device=att_labels.device,dtype=toch.long)
+        att_ids = torch.full((bs, max_len), self.att_pad_idx, device=att_labels.device, dtype=toch.long)
         for i in range(att_labels.shape[0]):
             idx = torch.nonzero(att_labels[i]).flatten()
             att_ids[i, :len(idx)] = idx
@@ -165,30 +164,46 @@ class SceneGraphEncoder(nn.Module):
 
     def _to_bs_format(self, bs_ids, node_embeds, node_masks, batch_size):
         max_len = -1
+        max_samples = -1
         num_nodes = torch.sum(node_masks == 0, dim=-1)
         node_masks = node_masks.squeeze(1)
         reformed_node_list = []
+        reformed_obj_list = []
+        reformed_obj_embeds, reformed_obj_masks = None, None
         for i in range(batch_size):
             cur_bs_ids = bs_ids == i
+            max_samples = max(max_samples, cur_bs_ids.sum())
             cur_num_nodes, cur_node_masks = num_nodes[cur_bs_ids], node_masks[cur_bs_ids]
             max_len = max(sum(cur_num_nodes), max_len)
             cur_node_embeds = node_embeds[cur_bs_ids][cur_node_masks == 0]
             reformed_node_list.append(cur_node_embeds)
+            reformed_obj_list.append(node_embeds[cur_bs_ids, 0])  # the first one is the obj embed
 
         reformed_node_embeds = torch.zeros(batch_size, max_len, node_embeds.shape[-1], device=node_embeds.device)
         reformed_node_masks = torch.full((batch_size, max_len), torch.finfo(node_embeds.dtype).min,
                                          device=node_embeds.device)
+
+        if self.use_obj_embeds:
+            reformed_obj_embeds = torch.zeros(batch_size, max_samples, node_embeds.shape[-1], device=node_embeds.device)
+            reformed_obj_masks = torch.full((batch_size, 1, max_samples), torch.finfo(node_embeds.dtype).min,
+                                            device=node_embeds.device)
+
         for i in range(batch_size):
             if len(reformed_node_list[i]) == 0:
                 self.zero_count += 1
                 # print(f'{self.zero_count} samples without any regions.')
-                #print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
+                # print(len(reformed_node_list[i]),reformed_node_masks.shape,reformed_node_list[i].shape if len(reformed_node_list[i])>0 else 0)
                 # print(reformed_node_list[i],reformed_node_embeds[i, :len(reformed_node_list[i])],reformed_node_masks[i, :len(reformed_node_list[i])])
             else:
                 reformed_node_embeds[i, :len(reformed_node_list[i])] = reformed_node_list[i]
                 reformed_node_masks[i, :len(reformed_node_list[i])] = 0.0
+                if self.use_obj_embeds:
+                    reformed_obj_embeds[i, :len(reformed_obj_list[i])] = reformed_obj_list[i]
+                    reformed_obj_masks[i, 0, :len(reformed_obj_list[i])] = 0.0
+                    reformed_obj_masks = reformed_obj_masks
 
-        return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
+        return reformed_node_embeds, reformed_node_masks.unsqueeze(
+            1), reformed_obj_embeds, reformed_obj_masks
 
 
 class SGEncoder(nn.Module):
@@ -223,8 +238,9 @@ class SGEncoder(nn.Module):
         if self.ape is not None:
             x = x + self.ape
         for layer in self.layers:
-            x, attn = layer(x, self_masks,bs_ids)
+            x, attn = layer(x, self_masks, bs_ids)
         return self.norm(x)
+
 
 class SGOADEncoderLayer(nn.Module):
     def __init__(self, config):
@@ -242,11 +258,11 @@ class SGOADEncoderLayer(nn.Module):
 
     def forward(self, x, self_masks, bs_ids):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_masks))
-        obj_embeds = x[:,0]
-        obj_embeds, obj_masks, _ = self._to_bs_format_obj(bs_ids,obj_embeds)
+        obj_embeds = x[:, 0]
+        obj_embeds, obj_masks, _ = self._to_bs_format_obj(bs_ids, obj_embeds)
         obj_embeds = self.sublayer[1](obj_embeds, lambda x: self.cross_attn(x, x, x, obj_masks))
         # since the boxes are put in batch size order, and we process in sequence, so actually no restore idx is needed
-        x[:,0] = obj_embeds[obj_masks.squeeze(1)==0]
+        x[:, 0] = obj_embeds[obj_masks.squeeze(1) == 0]
         return self.sublayer[2](x, self.feed_forward), self.cross_attn.attn
 
     def _to_bs_format_obj(self, bs_ids, obj_embeds):
@@ -254,13 +270,13 @@ class SGOADEncoderLayer(nn.Module):
         restore_idx = []
         max_len = max([(bs_ids == bs_id).sum() for bs_id in total_ids])
         padded_obj_embeds = torch.zeros(len(total_ids), max_len, obj_embeds.shape[-1], device=obj_embeds.device)
-        masks = torch.full((len(total_ids), max_len), torch.finfo(obj_embeds.dtype).min,device=obj_embeds.device)
-        for i,bs_id in enumerate(total_ids):
+        masks = torch.full((len(total_ids), max_len), torch.finfo(obj_embeds.dtype).min, device=obj_embeds.device)
+        for i, bs_id in enumerate(total_ids):
             select_ids = bs_ids == bs_id
             cur_len = select_ids.sum()
             restore_idx.extend(torch.nonzero(select_ids).flatten())
-            padded_obj_embeds[i,:cur_len] = obj_embeds[select_ids]
-            masks[i,:cur_len] =  0.0
+            padded_obj_embeds[i, :cur_len] = obj_embeds[select_ids]
+            masks[i, :cur_len] = 0.0
 
         return padded_obj_embeds, masks.unsqueeze(1), restore_idx
 
@@ -291,6 +307,7 @@ class SublayerConnection(nn.Module):
 
     def forward(self, x, sublayer):
         return x + self.dropout(sublayer(self.norm(x)))
+
 
 class MultiHeadedAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1, use_rpe=False, height=7, width=7):
