@@ -160,6 +160,9 @@ class R2DataLoader(DataLoader):
         if 'attribute_label_dicts' in batch[0].keys():
             keys.extend(['attribute_label_dicts'])
 
+        if 'disease_labels' in batch[0].keys():
+            keys.extend(['disease_labels'])
+
 
         batch_dict = {key: [sample[key] for sample in batch] for key in keys}
 
@@ -269,7 +272,12 @@ class R2DataLoader(DataLoader):
                 # batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=0)
             batch_dict['attribute_label_dicts'] = attribute_labels
 
+        if 'disease_labels' in batch[0].keys():
+            batch_dict['disease_labels'] = torch.cat(batch_dict['disease_labels'],dim=0)
+
         return batch_dict
+
+
 
 
 def seed_worker(worker_id):

@@ -23,6 +23,7 @@ import torchvision.transforms.v2 as transforms
 from tqdm import tqdm
 import torch.distributed as dist
 from config import cgnome_catid2attrange as catid2attrange, categories, cgnome_id2cat as id2cat
+import pandas as pd
 
 
 class BaseDatasetArrow(Dataset):
@@ -46,7 +47,14 @@ class BaseDatasetArrow(Dataset):
         self.text_column_name = text_column_name
         # self.all_texts = self.table[text_column_name].to_pandas().tolist()
         self.all_texts = self.table[text_column_name].to_pandas()
+        # all_texts = [text[0] for text in self.all_texts]
+        # img_ids = self.table['image_id'].to_pandas()
+        # temp = {'img_ids':img_ids,'Report Impression':all_texts}
+        # temp = pd.DataFrame(temp)
+        # temp.to_csv(f'{split}_disease_labels',index=False)
         self.no_region_count = 0
+        self.num_diseases = config['num_diseases']
+        self.dis_cls = config['dis_cls']
 
         if split == 'train':
             self.tokenizer = Tokenizer(config, self.all_texts)
@@ -84,11 +92,16 @@ class BaseDatasetArrow(Dataset):
                 # ann_file_path = os.path.join(root, 'annotations', f'box_{split}.json')
             self.box_infos = self.load_box_annotations(ann_file_path)
 
-            self.attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_mhead.json')
-            self.attributes = json.loads(open(self.attributes_path, 'r').read())
+            attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_mhead.json')
+            self.attributes = json.loads(open(attributes_path, 'r').read())
             self.attribute_anns, self.region_anns = self._parse_att_ann_info()
             self.att_labels = self.attributes['annotations']
             self.att_cat_info = self.attributes['attribute_info']
+
+        if self.dis_cls:
+            # perform disease classification
+            disease_path = os.path.join(root, 'annotations', 'disease_labels.json')
+            self.disease_anns = json.loads(open(disease_path, 'r').read())[split]
 
     def get_raw_image(self, index, image_key="image"):
         image_bytes = io.BytesIO(self.table[image_key][index].as_py())
@@ -96,7 +109,10 @@ class BaseDatasetArrow(Dataset):
         return Image.open(image_bytes).convert("RGB")
 
     def get_image(self, index, image_key="image"):
+        return_dict = {}
+
         iid = self.table['image_id'][index].as_py()
+
         if 'iu_xray' in self.dataset_name:
             image1 = self.get_raw_image(index, image_key='image1')
             image2 = self.get_raw_image(index, image_key='image2')
@@ -106,40 +122,47 @@ class BaseDatasetArrow(Dataset):
         else:
             image = self.get_raw_image(index, image_key=image_key)
             if self.region_cls:
-                box_ann = self.get_box(iid)
-                bboxes = datapoints.BoundingBox(box_ann['bboxes'], format=datapoints.BoundingBoxFormat.XYXY,
-                                                spatial_size=box_ann['spatial_size']
-                                                )
-                image_tensor, box_ann = self.transform['common_aug'](image,
-                                                                     {"boxes": bboxes, "labels": box_ann['labels']})
-
-                image_tensor = self.transform['norm_to_tensor'](image_tensor)
-
                 region_labels = self.get_region_label(image_id=iid)
-                box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
-            if self.att_cls:
-                attribute_labels = self.get_attribute_label(image_id=iid)
+                return_dict.update({'region_labels': region_labels})
 
-                # box masks are used to determine which mask will be selected
-                # to perform scene graph embedding and attribute prediction
+                if self.att_cls:
+                    box_ann = self.get_box(iid)
+                    bboxes = datapoints.BoundingBox(box_ann['bboxes'], format=datapoints.BoundingBoxFormat.XYXY,
+                                                    spatial_size=box_ann['spatial_size']
+                                                    )
+                    image_tensor, box_ann = self.transform['common_aug'](image,
+                                                                         {"boxes": bboxes, "labels": box_ann['labels']})
+
+                    image_tensor = self.transform['norm_to_tensor'](image_tensor)
+                    # box masks are used to determine which mask will be selected
+                    # to perform scene graph embedding and attribute prediction
+                    box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
+                    attribute_labels = self.get_attribute_label(image_id=iid)
+
+                    box_ann['box_labels'] = box_ann.pop('labels')
+                    return_dict.update(box_ann)
+
+                    name = "attribute_labels" if self.split == 'train' else "attribute_label_dicts"
+                    # name = "attribute_labels"
+                    return_dict.update({name: attribute_labels})
+
+
+                else:
+                    image_tensor = self.transform['common_aug'](image)
+                    image_tensor = self.transform['norm_to_tensor'](image_tensor)
+
             else:
                 image_tensor = self.transform['common_aug'](image)
                 image_tensor = self.transform['norm_to_tensor'](image_tensor)
-        return_dict = {
+
+        return_dict.update(
+            {
             "image": image_tensor,
             "img_id": iid,
             "img_index": index,
             "raw_index": index,
         }
-        if self.region_cls:
-            box_ann['box_labels'] = box_ann.pop('labels')
-            return_dict.update(box_ann)
-            return_dict.update({'region_labels': region_labels})
-
-        if self.att_cls:
-            name = "attribute_labels" if self.split == 'train' else "attribute_label_dicts"
-            # name = "attribute_labels"
-            return_dict.update({name: attribute_labels})
+        )
 
         return return_dict
 
@@ -175,6 +198,12 @@ class BaseDatasetArrow(Dataset):
         # 614 images in training filter set no attributes
         return self.attribute_anns.get(image_id, [])
 
+    def get_disease_label(self, image_id):
+        # if no any class present, then set no finding to 1
+        # if sum(self.disease_anns[image_id]) == 0:
+        #     disease_label = torch.zeros((1,self.num_diseases),type=torch.float)
+        return torch.FloatTensor(self.disease_anns[image_id]).unsqueeze(0)
+
     def get_text(self, index):
         text = self.all_texts[index][0]  # only one gt caption in rrg
         encoding = self.tokenizer(text)[:self.max_seq_length]
@@ -194,6 +223,10 @@ class BaseDatasetArrow(Dataset):
     def get_suite(self, index):
         ret = dict()
         ret.update(self.get_image(index))
+
+        if self.dis_cls:
+            ret.update({'disease_labels': self.get_disease_label(ret['img_id'])})
+
         txt = self.get_text(index)
         ret.update(txt)
         return ret

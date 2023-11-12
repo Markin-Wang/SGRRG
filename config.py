@@ -29,7 +29,7 @@ def config():
 
     # Model
     use_dropout = True
-    use_ln = False
+    use_ln = True
     ve_name = 'swin_s'
     ed_name = 'st_trans'
     visual_extractor_pretrained = True  # whether to load the pretrained visual extractor
@@ -89,8 +89,14 @@ def config():
     # region classification
     region_select_threshold = 0.5  # the threshold used to select the region after sigmoid
     region_cls = False
-    region_cls_w = 0.5
+    region_cls_w = 0.25
     use_mem_r = False
+
+    # disease classification
+    use_focal_ls_d = False
+    dis_cls = False
+    num_diseases = 14
+    dis_cls_w = 0.5
 
     # region memory setting
     num_mem = 512
@@ -99,7 +105,7 @@ def config():
 
     # attribute classification setting
     att_cls = False  # attribute classification
-    att_cls_w = 0.5
+    att_cls_w = 0.1
     num_tokens = image_size / 32  # 32 is the downsampling rate for the visual extractor
     output_size = 1
     num_classes = 29  # the number of anatomical locations
@@ -144,7 +150,7 @@ def config():
     # Evaluation
     monitor_metric = 'BLEU_4'
 
-    test_after = False
+    test_after = True
     start_eval = 0  # the epoch starts to perform evaluation
     resume = False
     early_exit = False  # used for test

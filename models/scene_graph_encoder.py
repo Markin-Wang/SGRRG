@@ -35,6 +35,7 @@ class SceneGraphEncoder(nn.Module):
         self.zero_att_count = 0
         self.all_box_count = 0
         self.max_att = max(id2cat)
+        self.num_diseases = config['num_diseases']
 
         if self.use_region_type_embed:
             self.token_type_embeddings = nn.Embedding(self.num_classes + 1, self.hidden_size)

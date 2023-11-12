@@ -17,6 +17,7 @@ from .vision_encoder import VisionEncoder
 from .decoder import Decoder
 from .word_embedding import BertEmbeddings, BasicEmbedding
 from collections import defaultdict
+from .head import DiseaseHead
 
 
 class RRGModel(nn.Module):
@@ -28,6 +29,7 @@ class RRGModel(nn.Module):
         self.records = []
         self.att_cls = config['att_cls']
         self.region_cls = config['region_cls']
+        self.dis_cls = config['dis_cls']
         self.use_box_feats = config['use_box_feats']
         self.use_obj_embeds = config['use_obj_embeds']
         self.use_sg = config['use_sg']
@@ -70,16 +72,19 @@ class RRGModel(nn.Module):
         self.rrg_head = nn.Linear(self.hidden_size, config['vocab_size'])
         self.rrg_head.apply(init_weights)
 
+        if self.dis_cls:
+            self.dis_head = DiseaseHead(config=config)
+
         if self.region_cls:
-            self.region_selector = RegionSelector(config)
+            self.region_selector = RegionSelector(config) # init in that module
 
         if self.att_cls:
             assert self.region_cls, "To perform attribute classification, region classification should be enabled."
-            self.attribute_predictor = AttributePredictor(config)
+            self.attribute_predictor = AttributePredictor(config) # init in that module
 
         if self.use_sg:
             assert self.att_cls and self.region_cls, 'region cls and attribute cls should be enabled.'
-            self.scene_graph_encoder = SceneGraphEncoder(config)
+            self.scene_graph_encoder = SceneGraphEncoder(config) # init in that module
 
     # if self.att_cls:
 
@@ -115,9 +120,13 @@ class RRGModel(nn.Module):
     def forward_train(self, batch_dict):
         images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs, sg_embeds, sg_masks = None, None, None, None, None, None
+        dis_logits = None
         return_dicts = {}
 
         patch_feats = self.extract_img_feats(images)
+
+        if self.dis_cls:
+            dis_logits = self.dis_head(patch_feats)
 
         if self.region_cls:
             boxes, box_labels, box_masks = batch_dict['boxes'], batch_dict['box_labels'], batch_dict['box_masks']
@@ -154,6 +163,7 @@ class RRGModel(nn.Module):
         return_dicts.update({'rrg_preds': output,
                              'region_logits': region_logits,
                              'att_logits': att_logits,
+                             'dis_logits': dis_logits,
                              })
 
         return return_dicts
@@ -161,10 +171,16 @@ class RRGModel(nn.Module):
     def forward_test(self, batch_dict, split='val'):
         images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs = None, None, None, None
+        dis_logits, dis_probs = None, None
         return_dicts = {}
         att_probs_record = defaultdict(dict)
 
         patch_feats = self.extract_img_feats(images)
+
+        if self.dis_cls:
+            dis_logits = self.dis_head(patch_feats)
+            dis_probs = torch.sigmoid(dis_logits)
+
         if self.region_cls:
             boxes, box_labels = batch_dict['boxes'], batch_dict['box_labels']
             # region_logits, region_probs, box_masks = self.region_selector(gbl_feats, boxes, box_labels, None)
@@ -215,6 +231,8 @@ class RRGModel(nn.Module):
                              'region_logits': region_logits,
                              'region_probs': region_probs,
                              'att_probs_record': att_probs_record,
+                             'dis_logits': dis_logits,
+                             'dis_probs': dis_probs,
                              # 'no_box_ids': no_box_ids,
                              'sg_embeds': sg_embeds if self.sgade else None,
                              'sg_masks': sg_masks if self.sgade else None,

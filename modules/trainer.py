@@ -21,6 +21,7 @@ from config import cgnome_id2cat, categories
 import json
 import glob
 
+
 # from modules.utils import get_grad_norm
 # import torch.distributed as dist
 
@@ -57,21 +58,27 @@ class BaseTrainer(object):
         #     for submodule in model.modules():
         #         submodule.register_forward_hook(nan_hook)
         self.model = model
-        self.att_cls = config['att_cls']  # attribute classification
+
         self.start_eval = config['start_eval']
         # for name, module in self.model.named_modules():
         #     module.register_backward_hook(get_activations(name))
         self.optimizer = optimizer
         self.scaler = GradScaler(enabled=self.use_amp, init_scale=256)
+        self.clip_option = config['clip_option']
         self.max_seq_length = config['max_seq_length']
 
+        self.att_cls = config['att_cls']  # attribute classification
         self.region_cls = config['region_cls']
-        self.clip_option = config['clip_option']
+        self.dis_cls = config['dis_cls']
+
         self.use_focal_ls_r = config['use_focal_ls_r']
         self.use_focal_ls_a = config['use_focal_ls_a']
+        self.use_focal_ls_d = config['use_focal_ls_d']
+
         if self.region_cls:
             if self.use_focal_ls_r:
-                self.region_cls_criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0.0, reduction='mean')
+                self.region_cls_criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0.0,
+                                                                    reduction='mean')
             else:
                 self.region_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.region_cls_w = config['region_cls_w']
@@ -82,6 +89,13 @@ class BaseTrainer(object):
             else:
                 self.att_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.att_cls_w = config['att_cls_w']
+
+        if self.dis_cls:
+            if self.use_focal_ls_d:
+                self.dis_cls_criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0.0, reduction='mean')
+            else:
+                self.dis_cls_criterion = torch.nn.BCEWithLogitsLoss()
+            self.dis_cls_w = config['dis_cls_w']
 
         self.use_sg = config['use_sg']
         self.criterion = criterion
@@ -109,7 +123,7 @@ class BaseTrainer(object):
         # keys to cuda
         self.keys = set(
             ['image', 'text', 'mask', 'boxes', 'box_labels', 'box_masks', 'region_labels', 'attribute_labels',
-             'attribute_ids'])
+             'attribute_ids', 'disease_labels'])
 
         if not os.path.exists(self.checkpoint_dir):
             os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -339,6 +353,7 @@ class Trainer(BaseTrainer):
 
     def _train_epoch(self, epoch):
         ce_losses = AverageMeter()
+        dis_cls_losses = AverageMeter()
         region_cls_losses = AverageMeter()
         attribute_cls_losses = AverageMeter()
         norm_meter = AverageMeter()
@@ -359,6 +374,13 @@ class Trainer(BaseTrainer):
                     rrg_preds = output['rrg_preds']
                     loss = self.criterion(rrg_preds, batch_dict['text'], batch_dict['mask'])
                     ce_losses.update(loss.item())
+
+                    if self.dis_cls:
+                        dis_logits = output['dis_logits']
+                        dis_cls_loss = self.dis_cls_criterion(dis_logits, batch_dict['disease_labels'])
+                        loss = loss + self.dis_cls_w * dis_cls_loss
+                        dis_cls_losses.update(dis_cls_loss.item())
+
                     if self.region_cls:
                         region_logits = output['region_logits']
                         region_cls_loss = self.region_cls_criterion(region_logits, batch_dict['region_labels'])
@@ -393,11 +415,12 @@ class Trainer(BaseTrainer):
                 norm_meter.update(grad_norm)
                 memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
                 # cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
-                pbar.set_postfix(ce=f'{ce_losses.val:.4f} ({ce_losses.avg:.4f})\t',
-                                 rg_cls=f'{region_cls_losses.val:.4f} ({region_cls_losses.avg:.4f})\t',
-                                 att_cls=f'{attribute_cls_losses.val:.4f} ({attribute_cls_losses.avg:.4f})\t',
+                pbar.set_postfix(ce=f'{ce_losses.val:.3f} ({ce_losses.avg:.3f})\t',
+                                 dis_cls=f'{dis_cls_losses.val:.3f} ({dis_cls_losses.avg:.3f})\t',
+                                 rg_cls=f'{region_cls_losses.val:.3f} ({region_cls_losses.avg:.3f})\t',
+                                 att_cls=f'{attribute_cls_losses.val:.3f} ({attribute_cls_losses.avg:.3f})\t',
                                  mem=f'mem {memory_used:.0f}MB',
-                                 norm=f'{norm_meter.val:.4f} ({norm_meter.avg:.4f})')
+                                 norm=f'{norm_meter.val:.3f} ({norm_meter.avg:.3f})')
                 pbar.update()
             # if self.early_exit and batch_idx>100:
             #     torch.save(self.model.records, 'cam_records_fblrelu.pth')
@@ -417,13 +440,13 @@ class Trainer(BaseTrainer):
     def _valid(self, epoch, split='test'):
         val_ce_losses = AverageMeter()
         val_region_cls_losses = AverageMeter()
-        val_att_cls_losses = AverageMeter()
+        val_dis_cls_losses = AverageMeter()
         log = {}
         self.model.eval()
         dataloader = self.val_dataloader if split == 'val' else self.test_dataloader
         device = self.model.device
         region_preds, region_targets = [], []
-        # attribute_preds, attribute_targets = [], []
+        dis_preds, dis_targets = [], []
         attribute_preds, attribute_targets = defaultdict(list), defaultdict(list)
         img_ids = []
 
@@ -445,6 +468,19 @@ class Trainer(BaseTrainer):
                     with autocast(dtype=torch.float16):
                         output = self.model(batch_dict, split=split)
 
+                        if self.dis_cls:
+                            dis_logits = output['dis_logits']
+                            dis_probs = output['dis_probs']
+                            val_dis_cls_loss = self.dis_cls_criterion(dis_logits, batch_dict['disease_labels'])
+                            val_dis_cls_losses.update(val_dis_cls_loss.item())
+                            if len(dis_preds) > 0:
+                                    dis_preds = torch.cat((dis_preds, dis_probs.cpu()), dim=0)
+                                    dis_targets = torch.cat((dis_targets, batch_dict['disease_labels'].cpu()), dim=0)
+                            else:
+                                dis_preds = dis_probs.cpu()
+                                dis_targets = batch_dict['disease_labels'].cpu().cpu()
+
+
                         if self.region_cls:
                             region_logits = output['region_logits'][region_masks]
                             region_probs = output['region_probs'][region_masks]
@@ -458,7 +494,7 @@ class Trainer(BaseTrainer):
                                     region_preds = region_probs.cpu()
                                     region_targets = region_labels.cpu()
 
-                        if self.att_cls and split=='test':
+                        if self.att_cls and split == 'test':
                             att_probs_record = output['att_probs_record']
                             attribute_labels = data['attribute_label_dicts']
                             for bs_id in att_probs_record.keys():
@@ -468,10 +504,10 @@ class Trainer(BaseTrainer):
                                             att_probs_record[bs_id][box_label][:cgnome_id2cat[box_label]].unsqueeze(0))
                                         attribute_targets[box_label].append(
                                             attribute_labels[bs_id][box_label])
-                        if self.use_new_bs:
-                            output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
-                        else:
-                            output = self.beam_search.sample(self.model.module, patch_feats=output['encoded_img_feats'])
+
+                        output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
+                        # else:
+                        #     output = self.beam_search.sample(self.model.module, patch_feats=output['encoded_img_feats'])
 
                     if split == 'test':
                         val_res.append(output['preds'])
@@ -488,10 +524,16 @@ class Trainer(BaseTrainer):
                     pbar.set_postfix(mem=f'mem {memory_used:.0f}MB')
                     pbar.update()
 
+                if self.dis_cls:
+                    dis_auc = calculate_auc(preds=dis_preds.numpy(),targets=dis_targets.long().numpy())
+                    log.update({f'{split}_dis_auc': dis_auc, f"{split}_dis_ls": val_dis_cls_losses.avg})
+
                 if self.region_cls:
-                    # ensure the data in each rank is the same to perform evaluation
+                    # note in multi-gpu training, results should be reported in 1-gpu test
+                    # or gather data from different rank
                     region_auc = calculate_auc(preds=region_preds.numpy(), targets=region_targets.long().numpy())
-                    log.update({f'{split}_region_auc': region_auc, f"{split}_rg_loss": val_region_cls_losses.avg})
+                    log.update({f'{split}_rg_auc': region_auc, f"{split}_rg_ls": val_region_cls_losses.avg})
+
                 if self.att_cls and split == 'test':
                     att_aucs = []
                     for key in attribute_preds.keys():
@@ -501,7 +543,7 @@ class Trainer(BaseTrainer):
                             column_sum = att_gts.sum(dim=0)
                             selected_column_ids = column_sum != 0
                             # print(f'{selected_column_ids.sum()} out of {selected_column_ids.shape[0]} categories selected.')
-                            att_preds, att_gts = att_preds[:,selected_column_ids], att_gts[:, selected_column_ids]
+                            att_preds, att_gts = att_preds[:, selected_column_ids], att_gts[:, selected_column_ids]
                             att_auc = calculate_auc(preds=att_preds.numpy(),
                                                     targets=att_gts.long().numpy())
                             att_aucs.append(att_auc)
@@ -526,6 +568,7 @@ class Trainer(BaseTrainer):
                 log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
                 if split != 'test':
                     val_res, val_gts = None, None
+
         return log, val_res, val_gts, img_ids
 
     def _pad(self, data):
@@ -534,21 +577,20 @@ class Trainer(BaseTrainer):
             padded_data[i, :cur_data.size(0)] = cur_data
         return padded_data
 
-    def test(self,save_dir=''):
+    def test(self, save_dir=''):
         self.logger.info('Starting evaluating the best checkpoint in test set.')
         log, val_res, val_gts, img_ids = self._valid(0, 'test')
         self.logger.info('The result for the best performed models in test set.')
         for key, value in log.items():
             self.logger.info('\t{:15s}: {}'.format(str(key), value))
-        save_dir = self.checkpoint_dir if len(save_dir)==0 else save_dir
-        self.save_caption(val_res,val_gts,img_ids,log,save_dir=save_dir)
+        save_dir = self.checkpoint_dir if len(save_dir) == 0 else save_dir
+        self.save_caption(val_res, val_gts, img_ids, log, save_dir=save_dir)
 
-
-    def save_caption(self, val_res,val_gts,img_ids,log, save_dir=''):
+    def save_caption(self, val_res, val_gts, img_ids, log, save_dir=''):
 
         rank = torch.distributed.get_rank()
         data = (img_ids, val_res, val_gts)
-        save_data = [{'img_id':img_id,'pred':pred,'gt':gt} for img_id, pred, gt in zip(*data)]
+        save_data = [{'img_id': img_id, 'pred': pred, 'gt': gt} for img_id, pred, gt in zip(*data)]
         save_data = [log] + save_data
         with open(f'caption_{rank}.json', 'w') as f:
             json.dump(save_data, f)
