@@ -104,6 +104,11 @@ def config():
     num_heads_r = 32
 
     # attribute classification setting
+    disr_cls = False # region disease classification
+    disr_cls_w = 0.25
+    disr_opt = 'cls' # classification or contrastive learning
+
+    use_focal_ls_dr = False
     att_cls = False  # attribute classification
     att_cls_w = 0.1
     num_tokens = image_size / 32  # 32 is the downsampling rate for the visual extractor

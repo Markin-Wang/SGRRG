@@ -120,7 +120,7 @@ class RRGModel(nn.Module):
     def forward_train(self, batch_dict):
         images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs, sg_embeds, sg_masks = None, None, None, None, None, None
-        dis_logits = None
+        dis_logits, disr_logits = None, None
         return_dicts = {}
 
         patch_feats = self.extract_img_feats(images)
@@ -133,7 +133,7 @@ class RRGModel(nn.Module):
             region_logits = self.region_selector(patch_feats, boxes, box_labels, box_masks)
 
         if self.att_cls:
-            box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
+            box_feats, att_logits, disr_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
             if self.use_box_feats:
                 patch_feats = box_feats
 
@@ -164,6 +164,7 @@ class RRGModel(nn.Module):
                              'region_logits': region_logits,
                              'att_logits': att_logits,
                              'dis_logits': dis_logits,
+                             'disr_logits': disr_logits,
                              })
 
         return return_dicts
@@ -171,7 +172,7 @@ class RRGModel(nn.Module):
     def forward_test(self, batch_dict, split='val'):
         images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs = None, None, None, None
-        dis_logits, dis_probs = None, None
+        dis_logits, dis_probs, disr_logits = None, None, None
         return_dicts = {}
         att_probs_record = defaultdict(dict)
 
@@ -196,7 +197,7 @@ class RRGModel(nn.Module):
             #         no_box_ids.append(batch_dict['img_id'][i])
 
         if self.att_cls:
-            box_feats, att_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
+            box_feats, att_logits, disr_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks=box_masks)
             att_probs = torch.sigmoid(att_logits)
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
             # print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
@@ -233,6 +234,7 @@ class RRGModel(nn.Module):
                              'att_probs_record': att_probs_record,
                              'dis_logits': dis_logits,
                              'dis_probs': dis_probs,
+                             'disr_logits': disr_logits,
                              # 'no_box_ids': no_box_ids,
                              'sg_embeds': sg_embeds if self.sgade else None,
                              'sg_masks': sg_masks if self.sgade else None,

@@ -92,9 +92,10 @@ class BaseDatasetArrow(Dataset):
                 # ann_file_path = os.path.join(root, 'annotations', f'box_{split}.json')
             self.box_infos = self.load_box_annotations(ann_file_path)
 
-            attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_mhead.json')
+            attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_mhead_ds.json')
             self.attributes = json.loads(open(attributes_path, 'r').read())
             self.attribute_anns, self.region_anns = self._parse_att_ann_info()
+            self.att_abnormal = self.attributes
             self.att_labels = self.attributes['annotations']
             self.att_cat_info = self.attributes['attribute_info']
 
@@ -122,7 +123,7 @@ class BaseDatasetArrow(Dataset):
         else:
             image = self.get_raw_image(index, image_key=image_key)
             if self.region_cls:
-                region_labels = self.get_region_label(image_id=iid)
+                region_labels, region_abnormal_labels = self.get_region_label(image_id=iid)
                 return_dict.update({'region_labels': region_labels})
 
                 if self.att_cls:
@@ -137,6 +138,7 @@ class BaseDatasetArrow(Dataset):
                     # box masks are used to determine which mask will be selected
                     # to perform scene graph embedding and attribute prediction
                     box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
+                    box_ann['box_abnormal_labels'] = region_abnormal_labels[0,box_ann['labels']]
                     attribute_labels = self.get_attribute_label(image_id=iid)
 
                     box_ann['box_labels'] = box_ann.pop('labels')
@@ -157,11 +159,11 @@ class BaseDatasetArrow(Dataset):
 
         return_dict.update(
             {
-            "image": image_tensor,
-            "img_id": iid,
-            "img_index": index,
-            "raw_index": index,
-        }
+                "image": image_tensor,
+                "img_id": iid,
+                "img_index": index,
+                "raw_index": index,
+            }
         )
 
         return return_dict
@@ -179,8 +181,11 @@ class BaseDatasetArrow(Dataset):
         if image_id not in self.region_anns:
             self.no_region_count += 1
             print(f'{self.no_region_count} have no regions.')
-
-        return self.region_anns.get(image_id, torch.zeros(1, len(categories)))
+            region_label, region_abnormal_label = torch.zeros(1, len(categories)), torch.zeros(1, len(categories))
+        else:
+            region_label, region_abnormal_label = self.region_anns[image_id]['region_labels'], \
+                                                  self.region_anns[image_id]['region_abnormal_labels']
+        return region_label,region_abnormal_label
 
     def get_box_mask(self, box_labels, region_labels):
         box_masks = region_labels[0, box_labels] == 1
@@ -375,14 +380,18 @@ class BaseDatasetArrow(Dataset):
 
     def _parse_att_ann_info(self):
         anns = self.attributes['annotations'][self.split]
+        att_info = self.attributes['attribute_info']
         attribute_anns = {}
         region_anns = {}
         num_regions = len(categories)
         for k, v in anns.items():
-            region_label = v['region_label']
+            region_label = v['region_label']['region_label']
             region_label_ = torch.zeros(1, num_regions)
             region_label_[0, region_label] = 1  # ensure the label consistency
-            region_anns[k] = region_label_
+            region_disease_labels = torch.zeros(1, num_regions)
+            region_disease_labels[0, region_label] = torch.FloatTensor(v['region_label']['region_abnormal_labels'])
+            region_anns[k] = {'region_labels': region_label_, 'region_abnormal_labels': region_disease_labels}
+
             v.pop('region_label')
             attribute_anns[k] = {self.name2label[kk]: vv for kk, vv in v.items()}
             # transform to muli-hot vetor in collate_fn as too many classes, otherwise occpuy a large RAM

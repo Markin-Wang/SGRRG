@@ -146,7 +146,7 @@ class R2DataLoader(DataLoader):
         keys = ['img_id', 'image', 'text', 'mask', 'seq_length']  # data used
 
         if 'boxes' in batch[0].keys():
-            keys.extend(['box_labels', 'boxes'])
+            keys.extend(['box_labels', 'boxes', 'box_abnormal_labels'])
 
         if 'region_labels' in batch[0].keys():
             keys.extend(['region_labels'])
@@ -163,7 +163,6 @@ class R2DataLoader(DataLoader):
         if 'disease_labels' in batch[0].keys():
             keys.extend(['disease_labels'])
 
-
         batch_dict = {key: [sample[key] for sample in batch] for key in keys}
 
         # print(1111,batch_dict['boxes'][0])
@@ -177,8 +176,6 @@ class R2DataLoader(DataLoader):
         # print(2222, batch_dict['attribute_labels'][0])
         #
         # print(3333, batch_dict['img_id'][0], batch_dict['region_labels'][0])
-
-
 
         reports_ids, reports_masks, seq_lengths, = batch_dict['text'], batch_dict['mask'], batch_dict['seq_length']
 
@@ -199,17 +196,20 @@ class R2DataLoader(DataLoader):
 
         if 'boxes' in batch[0].keys():
             boxes, labels = batch_dict['boxes'], batch_dict['box_labels']
-            boxes_, labels_ = [], []
-            for i, (box, label) in enumerate(zip(boxes, labels)):
+            box_abnormal_labels = batch_dict['box_abnormal_labels']
+            boxes_, labels_, box_abnormal_labels_ = [], [], []
+            for i, (box, label,box_abnormal_label) in enumerate(zip(boxes, labels, box_abnormal_labels)):
                 num_box = len(box)
                 box_with_id = torch.zeros(num_box, 5)
                 box_with_id[:, 0] = i
                 box_with_id[:, 1:] = box
                 boxes_.append(box_with_id)
                 labels_.append(torch.from_numpy(label))
+                box_abnormal_labels_.append(box_abnormal_label)
 
             batch_dict['boxes'] = torch.cat(boxes_, dim=0)
             batch_dict['box_labels'] = torch.cat(labels_, dim=0)
+            batch_dict['box_abnormal_labels'] = torch.cat(box_abnormal_labels_, dim=0)
 
         if 'region_labels' in batch[0].keys():
             batch_dict['region_labels'] = torch.cat(batch_dict['region_labels'], dim=0)
@@ -226,27 +226,31 @@ class R2DataLoader(DataLoader):
             max_att = -1
             for i, attribute_label in enumerate(batch_dict['attribute_labels']):
                 i_box_labels = selected_box_labels[selected_boxes_bsid == i]
-                #print(1111,i,batch_dict['img_id'][i],torch.nonzero(selected_boxes_bsid == i).flatten())
+                # print(1111,i,batch_dict['img_id'][i],torch.nonzero(selected_boxes_bsid == i).flatten())
                 if len(attribute_label) == 0:
                     attribute_masks.append(torch.ones(i_box_labels.size(0)))
                     continue
                 else:
                     attribute_masks.append(torch.zeros(i_box_labels.size(0)))
+
                 for box_label in i_box_labels:
-                    temp_label = attribute_label[box_label.item()]
+                    temp_label = attribute_label[box_label.item()]['att_labels']
                     max_att = max(max_att, len(temp_label))
                     # attribute_ids.append(temp_label)
                     attribute_ids.append(np.array(temp_label) + cgnome_cumcat[box_label.item()])
                     # attribute_label_ = torch.zeros(1,849) # 849 attributes
                     attribute_label_ = torch.zeros(1, cgnome_id2cat[box_label.item()])
+                    disease_label_ = torch.zeros(1, cgnome_id2cat[box_label.item()])
                     attribute_label_[0, temp_label] = 1.0
+                    disease_label_[0, temp_label] = torch.FloatTensor(attribute_label[box_label.item()]['att_abnormal_labels'])
                     attribute_labels.append(attribute_label_)
             if attribute_labels:
                 # batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=0)
-                batch_dict['attribute_labels'] = torch.cat(attribute_labels, dim=-1) # [1, len]
+                batch_dict['attribute_labels'] = torch.cat(attribute_labels, dim=-1)  # [1, len]
                 # print(1111,batch_dict['attribute_labels'].shape, (batch_dict['attribute_labels']==1).sum()/batch_dict['attribute_labels'].shape[1])
                 # around 8% positive labels
-                attribute_ids_ = torch.full((len(attribute_labels), max_att), -10000, dtype=torch.long)  # att_pad_idx is -1e4
+                attribute_ids_ = torch.full((len(attribute_labels), max_att), -10000,
+                                            dtype=torch.long)  # att_pad_idx is -1e4
                 for i, att_id in enumerate(attribute_ids):
                     attribute_ids_[i, :len(att_id)] = torch.LongTensor(att_id)
                 batch_dict['attribute_ids'] = attribute_ids_
@@ -262,7 +266,7 @@ class R2DataLoader(DataLoader):
                 i_box_labels = selected_box_labels[selected_boxes_bsid == i]
                 cur_attribute_labels = {}
                 for box_label in i_box_labels:
-                    temp_label = attribute_label[box_label.item()]
+                    temp_label = attribute_label[box_label.item()]['att_labels']
                     # attribute_ids.append(temp_label)
                     # attribute_label_ = torch.zeros(1,849) # 849 attributes
                     attribute_label_ = torch.zeros(1, cgnome_id2cat[box_label.item()])
@@ -273,11 +277,9 @@ class R2DataLoader(DataLoader):
             batch_dict['attribute_label_dicts'] = attribute_labels
 
         if 'disease_labels' in batch[0].keys():
-            batch_dict['disease_labels'] = torch.cat(batch_dict['disease_labels'],dim=0)
+            batch_dict['disease_labels'] = torch.cat(batch_dict['disease_labels'], dim=0)
 
         return batch_dict
-
-
 
 
 def seed_worker(worker_id):

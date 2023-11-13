@@ -70,10 +70,12 @@ class BaseTrainer(object):
         self.att_cls = config['att_cls']  # attribute classification
         self.region_cls = config['region_cls']
         self.dis_cls = config['dis_cls']
+        self.disr_cls = config['disr_cls']
 
         self.use_focal_ls_r = config['use_focal_ls_r']
         self.use_focal_ls_a = config['use_focal_ls_a']
         self.use_focal_ls_d = config['use_focal_ls_d']
+        self.use_focal_ls_dr = config['use_focal_ls_dr']
 
         if self.region_cls:
             if self.use_focal_ls_r:
@@ -89,6 +91,14 @@ class BaseTrainer(object):
             else:
                 self.att_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.att_cls_w = config['att_cls_w']
+
+            if self.disr_cls:
+                if self.use_focal_ls_dr:
+                    self.disr_cls_criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0.0,
+                                                                      reduction='mean')
+                else:
+                    self.disr_cls_criterion = torch.nn.BCEWithLogitsLoss()
+                self.disr_cls_w = config['disr_cls_w']
 
         if self.dis_cls:
             if self.use_focal_ls_d:
@@ -122,8 +132,8 @@ class BaseTrainer(object):
 
         # keys to cuda
         self.keys = set(
-            ['image', 'text', 'mask', 'boxes', 'box_labels', 'box_masks', 'region_labels', 'attribute_labels',
-             'attribute_ids', 'disease_labels'])
+            ['image', 'text', 'mask', 'boxes', 'box_labels', 'box_abnormal_labels', 'box_masks', 'region_labels',
+             'attribute_labels', 'attribute_ids', 'disease_labels'])
 
         if not os.path.exists(self.checkpoint_dir):
             os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -354,6 +364,7 @@ class Trainer(BaseTrainer):
     def _train_epoch(self, epoch):
         ce_losses = AverageMeter()
         dis_cls_losses = AverageMeter()
+        disr_cls_losses = AverageMeter()
         region_cls_losses = AverageMeter()
         attribute_cls_losses = AverageMeter()
         norm_meter = AverageMeter()
@@ -394,6 +405,14 @@ class Trainer(BaseTrainer):
                         loss = loss + self.att_cls_w * attribute_cls_loss
                         attribute_cls_losses.update(attribute_cls_loss.item())
 
+                        if self.disr_cls:
+                            disr_logits = output['disr_logits']
+                            disr_labels = batch_dict['box_abnormal_labels'][batch_dict['box_masks']].unsqueeze(-1) # [bs ,1]
+                            disr_cls_loss = self.dis_cls_criterion(disr_logits, disr_labels)
+                            loss = loss + self.disr_cls_w * disr_cls_loss
+                            disr_cls_losses.update(attribute_cls_loss.item())
+
+
                 self.scaler.scale(loss).backward()
 
                 self.scaler.unscale_(self.optimizer)
@@ -417,7 +436,8 @@ class Trainer(BaseTrainer):
                 # cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
                 pbar.set_postfix(ce=f'{ce_losses.val:.3f} ({ce_losses.avg:.3f})\t',
                                  dis_cls=f'{dis_cls_losses.val:.3f} ({dis_cls_losses.avg:.3f})\t',
-                                 rg_cls=f'{region_cls_losses.val:.3f} ({region_cls_losses.avg:.3f})\t',
+                                 disr_cls=f'{disr_cls_losses.val:.3f} ({disr_cls_losses.avg:.3f})\t' ,
+                                 rg_cls=f'{region_cls_losses.val:.3f} ({region_cls_losses.avg:.3f})\t' ,
                                  att_cls=f'{attribute_cls_losses.val:.3f} ({attribute_cls_losses.avg:.3f})\t',
                                  mem=f'mem {memory_used:.0f}MB',
                                  norm=f'{norm_meter.val:.3f} ({norm_meter.avg:.3f})')
@@ -474,12 +494,11 @@ class Trainer(BaseTrainer):
                             val_dis_cls_loss = self.dis_cls_criterion(dis_logits, batch_dict['disease_labels'])
                             val_dis_cls_losses.update(val_dis_cls_loss.item())
                             if len(dis_preds) > 0:
-                                    dis_preds = torch.cat((dis_preds, dis_probs.cpu()), dim=0)
-                                    dis_targets = torch.cat((dis_targets, batch_dict['disease_labels'].cpu()), dim=0)
+                                dis_preds = torch.cat((dis_preds, dis_probs.cpu()), dim=0)
+                                dis_targets = torch.cat((dis_targets, batch_dict['disease_labels'].cpu()), dim=0)
                             else:
                                 dis_preds = dis_probs.cpu()
                                 dis_targets = batch_dict['disease_labels'].cpu().cpu()
-
 
                         if self.region_cls:
                             region_logits = output['region_logits'][region_masks]
@@ -525,7 +544,7 @@ class Trainer(BaseTrainer):
                     pbar.update()
 
                 if self.dis_cls:
-                    dis_auc = calculate_auc(preds=dis_preds.numpy(),targets=dis_targets.long().numpy())
+                    dis_auc = calculate_auc(preds=dis_preds.numpy(), targets=dis_targets.long().numpy())
                     log.update({f'{split}_dis_auc': dis_auc, f"{split}_dis_ls": val_dis_cls_losses.avg})
 
                 if self.region_cls:
@@ -552,6 +571,7 @@ class Trainer(BaseTrainer):
                             continue
                     att_auc = np.mean(att_aucs) if att_aucs else 0
                     log.update({f'{split}_att_auc': att_auc})
+
 
                 # ensure the data in each rank is the same to perform evaluation
                 if split == 'test':
