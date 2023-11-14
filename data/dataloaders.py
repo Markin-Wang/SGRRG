@@ -358,7 +358,7 @@ class R2DataLoader(DataLoader):
             batch_dict['box_masks'] = torch.cat(batch_dict['box_masks'], dim=0)
 
         if 'attribute_ids' in batch[0].keys():
-            attribute_labels =[torch.from_numpy(att_labels) for att_labels in batch_dict['attribute_labels']]
+            attribute_labels =[torch.from_numpy(att_labels) for att_labels in batch_dict['attribute_labels'] if att_labels]
             # ensure the order is the same as the box ann
             batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=-1)
 
