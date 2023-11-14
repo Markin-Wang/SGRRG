@@ -187,7 +187,7 @@ class R2DataLoader(DataLoader):
             boxes, labels = batch_dict['boxes'], batch_dict['box_labels']
             box_abnormal_labels = batch_dict['box_abnormal_labels']
             boxes_, labels_, box_abnormal_labels_ = [], [], []
-            for i, (box, label,box_abnormal_label) in enumerate(zip(boxes, labels, box_abnormal_labels)):
+            for i, (box, label, box_abnormal_label) in enumerate(zip(boxes, labels, box_abnormal_labels)):
                 num_box = len(box)
                 box_with_id = torch.zeros(num_box, 5)
                 box_with_id[:, 0] = i
@@ -232,14 +232,15 @@ class R2DataLoader(DataLoader):
                     # there are some regions without any attributes
                     temp_label = attribute_label[box_label.item()]['att_labels']
                     max_att = max(max_att, len(temp_label))
-                    max_att_cur = max(max_att_cur,len(temp_label))
+                    max_att_cur = max(max_att_cur, len(temp_label))
                     # attribute_ids.append(temp_label)
                     attribute_ids.append(np.array(temp_label) + cgnome_cumcat[box_label.item()])
                     # attribute_label_ = torch.zeros(1,849) # 849 attributes
                     attribute_label_ = torch.zeros(1, cgnome_id2cat[box_label.item()])
                     disease_label_ = torch.zeros(1, cgnome_id2cat[box_label.item()])
                     attribute_label_[0, temp_label] = 1.0
-                    disease_label_[0, temp_label] = torch.FloatTensor(attribute_label[box_label.item()]['att_abnormal_labels'])
+                    disease_label_[0, temp_label] = torch.FloatTensor(
+                        attribute_label[box_label.item()]['att_abnormal_labels'])
                     attribute_labels.append(attribute_label_)
 
                     # to save the attribute_labels and attribute_ids for each samples
@@ -358,23 +359,25 @@ class R2DataLoader(DataLoader):
             batch_dict['box_masks'] = torch.cat(batch_dict['box_masks'], dim=0)
 
         if 'attribute_ids' in batch[0].keys():
-            attribute_labels =[torch.from_numpy(att_labels) for att_labels in batch_dict['attribute_labels'] if att_labels]
+            attribute_labels = [torch.from_numpy(att_labels) for att_labels in batch_dict['attribute_labels'] if
+                                len(att_labels) > 0]
             # ensure the order is the same as the box ann
-            batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=-1)
+            batch_dict['attribute_labels'] = torch.cat(attribute_labels, dim=-1)
 
             attribute_ids = batch_dict['attribute_ids']
             max_att = max([att_id[-1] for att_id in attribute_ids])
-            total_att = sum([len(att_id)-1 for att_id in attribute_ids])
+            total_att = sum([len(att_id) - 1 for att_id in attribute_ids])
 
-            attribute_ids_ = torch.full((total_att, max_att), -10000,dtype=torch.long)  # att_pad_idx is -1e4
+            attribute_ids_ = torch.full((total_att, max_att), -10000, dtype=torch.long)  # att_pad_idx is -1e4
 
             cur_idx = 0
             for att_ids in attribute_ids:
                 for att_id in att_ids[:-1]:
                     attribute_ids_[cur_idx, :len(att_id)] = torch.LongTensor(att_id)
-                    cur_idx+=1
+                    cur_idx += 1
 
-            assert cur_idx == len(attribute_ids_), f'{cur_idx} is not equal to the length of attribute_ids_ {len(attribute_ids_)}'
+            assert cur_idx == len(
+                attribute_ids_), f'{cur_idx} is not equal to the length of attribute_ids_ {len(attribute_ids_)}'
             batch_dict['attribute_ids'] = attribute_ids_
 
         if 'disease_labels' in batch[0].keys():
