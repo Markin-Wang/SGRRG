@@ -373,9 +373,17 @@ class Trainer(BaseTrainer):
         # cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
         self.optimizer.zero_grad()
         device = self.model.device
+        img2attinfo = {}
         with tqdm(desc='Epoch %d - train' % epoch, disable=dist.get_rank() != self.local_rank,
                   unit='it', total=len(self.train_dataloader)) as pbar:
             for batch_idx, data in enumerate(self.train_dataloader):
+                # attribute_labels, attribute_ids = data['attribute_labels'], data['attribute_ids']
+                # img_ids = data['img_id']
+                # img2attinfo.update(
+                #     {img_ids[i]:{'attribute_labels':attribute_labels[i],'attribute_ids':attribute_ids[i]} for i in range(len(img_ids))}
+                # )
+                # pbar.update()
+                # continue
                 batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if key in self.keys}
 
                 self.optimizer.zero_grad()
@@ -408,7 +416,7 @@ class Trainer(BaseTrainer):
                         if self.disr_cls:
                             disr_logits = output['disr_logits']
                             disr_labels = batch_dict['box_abnormal_labels'][batch_dict['box_masks']].unsqueeze(-1) # [bs ,1]
-                            disr_cls_loss = self.dis_cls_criterion(disr_logits, disr_labels)
+                            disr_cls_loss = self.disr_cls_criterion(disr_logits, disr_labels)
                             loss = loss + self.disr_cls_w * disr_cls_loss
                             disr_cls_losses.update(attribute_cls_loss.item())
 
@@ -442,9 +450,9 @@ class Trainer(BaseTrainer):
                                  mem=f'mem {memory_used:.0f}MB',
                                  norm=f'{norm_meter.val:.3f} ({norm_meter.avg:.3f})')
                 pbar.update()
-            # if self.early_exit and batch_idx>100:
-            #     torch.save(self.model.records, 'cam_records_fblrelu.pth')
-            #     exit()
+
+            # torch.save(img2attinfo,'imgid2attinfo_train.pth')
+            # exit()
 
         log = {'ce_loss': ce_losses.avg,
                'region_loss': region_cls_losses.avg,
@@ -469,12 +477,20 @@ class Trainer(BaseTrainer):
         dis_preds, dis_targets = [], []
         attribute_preds, attribute_targets = defaultdict(list), defaultdict(list)
         img_ids = []
+        img2attinfo = {}
 
         with tqdm(desc=f'Epoch %d - {split}' % epoch, unit='it', total=len(dataloader),
                   disable=dist.get_rank() != self.local_rank) as pbar:
             with torch.no_grad():
                 val_gts, val_res = [], []
                 for batch_idx, data in enumerate(dataloader):
+                    # attribute_labels = data['attribute_label_dicts']
+                    # img_ids = data['img_id']
+                    # img2attinfo.update(
+                    #     {img_ids[i]:attribute_labels[i] for i in range(len(img_ids))}
+                    # )
+                    # pbar.update()
+                    # continue
                     batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if
                                   key in self.keys}
                     if self.region_cls:
@@ -498,7 +514,7 @@ class Trainer(BaseTrainer):
                                 dis_targets = torch.cat((dis_targets, batch_dict['disease_labels'].cpu()), dim=0)
                             else:
                                 dis_preds = dis_probs.cpu()
-                                dis_targets = batch_dict['disease_labels'].cpu().cpu()
+                                dis_targets = batch_dict['disease_labels'].cpu()
 
                         if self.region_cls:
                             region_logits = output['region_logits'][region_masks]
@@ -543,6 +559,10 @@ class Trainer(BaseTrainer):
                     pbar.set_postfix(mem=f'mem {memory_used:.0f}MB')
                     pbar.update()
 
+                # torch.save(img2attinfo, f'imgid2attinfo_{split}.pth')
+                # return log, val_res, val_gts, img_ids
+
+
                 if self.dis_cls:
                     dis_auc = calculate_auc(preds=dis_preds.numpy(), targets=dis_targets.long().numpy())
                     log.update({f'{split}_dis_auc': dis_auc, f"{split}_dis_ls": val_dis_cls_losses.avg})
@@ -557,14 +577,14 @@ class Trainer(BaseTrainer):
                     att_aucs = []
                     for key in attribute_preds.keys():
                         try:
-                            att_preds, att_gts = torch.cat(attribute_preds[key], dim=0), torch.cat(
-                                attribute_targets[key], dim=0)
-                            column_sum = att_gts.sum(dim=0)
+                            att_preds, att_gts = torch.cat(attribute_preds[key], dim=0), np.concatenate(
+                                attribute_targets[key], axis=0)
+                            column_sum = att_gts.sum(axis=0)
                             selected_column_ids = column_sum != 0
                             # print(f'{selected_column_ids.sum()} out of {selected_column_ids.shape[0]} categories selected.')
                             att_preds, att_gts = att_preds[:, selected_column_ids], att_gts[:, selected_column_ids]
                             att_auc = calculate_auc(preds=att_preds.numpy(),
-                                                    targets=att_gts.long().numpy())
+                                                    targets=att_gts.astype(np.int64))
                             att_aucs.append(att_auc)
                         except  ValueError:
                             self.logger.info(f'Att calculation on category {categories[key]} fails.')

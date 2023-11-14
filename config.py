@@ -104,6 +104,7 @@ def config():
     num_heads_r = 32
 
     # attribute classification setting
+    preload_att = False
     disr_cls = False # region disease classification
     disr_cls_w = 0.25
     disr_opt = 'cls' # classification or contrastive learning

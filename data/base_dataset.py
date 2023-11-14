@@ -43,6 +43,7 @@ class BaseDatasetArrow(Dataset):
         self.num_attributes = config['num_attributes']
         self.name2label = {name: i for i, name in enumerate(categories)}  # ensure the label setting consistency
         self.max_att = max(id2cat)
+        self.preload_att = config['preload_att']
 
         self.text_column_name = text_column_name
         # self.all_texts = self.table[text_column_name].to_pandas().tolist()
@@ -95,6 +96,8 @@ class BaseDatasetArrow(Dataset):
             attributes_path = os.path.join(root, 'annotations', 'attribute_anns_id_mhead_ds.json')
             self.attributes = json.loads(open(attributes_path, 'r').read())
             self.attribute_anns, self.region_anns = self._parse_att_ann_info()
+            if self.preload_att and self.split == 'train':
+                self.attribute_anns = torch.load(os.path.join(root, 'annotations', 'imgid2mattinfo.pth'))[split]
             self.att_abnormal = self.attributes
             self.att_labels = self.attributes['annotations']
             self.att_cat_info = self.attributes['attribute_info']
@@ -139,14 +142,18 @@ class BaseDatasetArrow(Dataset):
                     # to perform scene graph embedding and attribute prediction
                     box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
                     box_ann['box_abnormal_labels'] = region_abnormal_labels[0,box_ann['labels']]
-                    attribute_labels = self.get_attribute_label(image_id=iid)
+                    att_info = self.get_attribute_label(image_id=iid)
+                    if self.preload_att and self.split == 'train':
+                        return_dict.update(att_info)
+                    else:
+                        # name = 'attribute_label_dicts' if self.split == 'test' else 'attribute_label_dicts'
+                        if self.split == 'test':
+                            return_dict.update({'attribute_label_dicts':att_info})
+                        if self.split == 'train':
+                            return_dict.update({'attribute_labels': att_info})
 
                     box_ann['box_labels'] = box_ann.pop('labels')
                     return_dict.update(box_ann)
-
-                    name = "attribute_labels" if self.split == 'train' else "attribute_label_dicts"
-                    # name = "attribute_labels"
-                    return_dict.update({name: attribute_labels})
 
 
                 else:
@@ -398,5 +405,5 @@ class BaseDatasetArrow(Dataset):
         return attribute_anns, region_anns
 
     def __len__(self):
-        ratio = 20 if self.split == 'train' else 10
+        ratio = 20 if self.split == 'train' else 20
         return len(self.all_texts) // ratio if self.debug else len(self.all_texts)

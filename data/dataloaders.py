@@ -28,6 +28,7 @@ class R2DataLoader(DataLoader):
         self.vis = vis
         self.test = config['test']
         self.att_cls = config['att_cls']
+        self.preload_att = config['preload_att']
         g = torch.Generator()
         g.manual_seed(config['seed'])
 
@@ -100,7 +101,7 @@ class R2DataLoader(DataLoader):
                     'num_workers': self.num_workers,
                     'pin_memory': True,
                     'drop_last': self.drop_last,
-                    'collate_fn': self.collate_fn,
+                    'collate_fn': self.collate_fn_preload if self.preload_att and self.split == 'train' else self.collate_fn,
                     'worker_init_fn': seed_worker,
                     'prefetch_factor': self.batch_size // self.num_workers * 2
                 }
@@ -113,7 +114,7 @@ class R2DataLoader(DataLoader):
                     'num_workers': self.num_workers,
                     'pin_memory': True,
                     'drop_last': self.drop_last,
-                    'collate_fn': self.collate_fn,
+                    'collate_fn': self.collate_fn_preload if self.preload_att and self.split == 'train' else self.collate_fn,
                     'worker_init_fn': seed_worker,
                     'generator': g,
                     'prefetch_factor': self.batch_size // self.num_workers * 2
@@ -125,7 +126,7 @@ class R2DataLoader(DataLoader):
                 'sampler': self.sampler,
                 'batch_size': self.batch_size,
                 # 'shuffle':shuffle,
-                'collate_fn': self.collate_fn,
+                'collate_fn': self.collate_fn_preload if self.preload_att and self.split == 'train' else self.collate_fn,
                 'worker_init_fn': seed_worker,
                 'num_workers': self.num_workers,
                 'pin_memory': True,
@@ -164,18 +165,6 @@ class R2DataLoader(DataLoader):
             keys.extend(['disease_labels'])
 
         batch_dict = {key: [sample[key] for sample in batch] for key in keys}
-
-        # print(1111,batch_dict['boxes'][0])
-        #
-        # print(2222, batch_dict['box_labels'][0])
-        #
-        # print(3333,batch_dict['attribute_labels'][0])
-        #
-        # print(1111, batch_dict['img_id'][0])
-        #
-        # print(2222, batch_dict['attribute_labels'][0])
-        #
-        # print(3333, batch_dict['img_id'][0], batch_dict['region_labels'][0])
 
         reports_ids, reports_masks, seq_lengths, = batch_dict['text'], batch_dict['mask'], batch_dict['seq_length']
 
@@ -224,6 +213,11 @@ class R2DataLoader(DataLoader):
             attribute_masks = []
             attribute_ids = []
             max_att = -1
+
+            # to save the attribute_labels and attribute_ids for each samples
+            # temp1 = [[] for i in range(len(batch))]
+            # temp2 = [[] for i in range(len(batch))]
+
             for i, attribute_label in enumerate(batch_dict['attribute_labels']):
                 i_box_labels = selected_box_labels[selected_boxes_bsid == i]
                 # print(1111,i,batch_dict['img_id'][i],torch.nonzero(selected_boxes_bsid == i).flatten())
@@ -233,9 +227,12 @@ class R2DataLoader(DataLoader):
                 else:
                     attribute_masks.append(torch.zeros(i_box_labels.size(0)))
 
+                max_att_cur = -1
                 for box_label in i_box_labels:
+                    # there are some regions without any attributes
                     temp_label = attribute_label[box_label.item()]['att_labels']
                     max_att = max(max_att, len(temp_label))
+                    max_att_cur = max(max_att_cur,len(temp_label))
                     # attribute_ids.append(temp_label)
                     attribute_ids.append(np.array(temp_label) + cgnome_cumcat[box_label.item()])
                     # attribute_label_ = torch.zeros(1,849) # 849 attributes
@@ -244,6 +241,12 @@ class R2DataLoader(DataLoader):
                     attribute_label_[0, temp_label] = 1.0
                     disease_label_[0, temp_label] = torch.FloatTensor(attribute_label[box_label.item()]['att_abnormal_labels'])
                     attribute_labels.append(attribute_label_)
+
+                    # to save the attribute_labels and attribute_ids for each samples
+                #     temp1[i].append(attribute_label_)
+                #     temp2[i].append(np.array(temp_label) + cgnome_cumcat[box_label.item()])
+                # temp2[i].append(max_att_cur)
+
             if attribute_labels:
                 # batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=0)
                 batch_dict['attribute_labels'] = torch.cat(attribute_labels, dim=-1)  # [1, len]
@@ -256,12 +259,18 @@ class R2DataLoader(DataLoader):
                 batch_dict['attribute_ids'] = attribute_ids_
             else:
                 batch_dict['attribute_labels'] = []
+
+            # to save the attribute_labels and attribute_ids for each samples
+            # batch_dict['attribute_labels'] = [torch.cat(att_label,dim=-1).numpy() if len(att_label)>0 else [] for att_label in temp1]
+            # batch_dict['attribute_ids'] = temp2
+
             batch_dict['attribute_masks'] = torch.cat(attribute_masks, dim=0)
 
         if 'attribute_label_dicts' in batch[0].keys():
             attribute_labels = []
             selected_box_labels = batch_dict['box_labels'][batch_dict['box_masks']]
             selected_boxes_bsid = batch_dict['boxes'][batch_dict['box_masks'], 0]
+
             for i, attribute_label in enumerate(batch_dict['attribute_label_dicts']):
                 i_box_labels = selected_box_labels[selected_boxes_bsid == i]
                 cur_attribute_labels = {}
@@ -269,12 +278,104 @@ class R2DataLoader(DataLoader):
                     temp_label = attribute_label[box_label.item()]['att_labels']
                     # attribute_ids.append(temp_label)
                     # attribute_label_ = torch.zeros(1,849) # 849 attributes
-                    attribute_label_ = torch.zeros(1, cgnome_id2cat[box_label.item()])
+                    attribute_label_ = np.zeros((1, cgnome_id2cat[box_label.item()]))
                     attribute_label_[0, temp_label] = 1.0
                     cur_attribute_labels[box_label.item()] = attribute_label_
                 attribute_labels.append(cur_attribute_labels)
                 # batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=0)
             batch_dict['attribute_label_dicts'] = attribute_labels
+
+        if 'disease_labels' in batch[0].keys():
+            batch_dict['disease_labels'] = torch.cat(batch_dict['disease_labels'], dim=0)
+
+        return batch_dict
+
+    @staticmethod
+    def collate_fn_preload(batch):
+        keys = ['img_id', 'image', 'text', 'mask', 'seq_length']  # data used
+
+        if 'boxes' in batch[0].keys():
+            keys.extend(['box_labels', 'boxes', 'box_abnormal_labels'])
+
+        if 'region_labels' in batch[0].keys():
+            keys.extend(['region_labels'])
+
+        if 'box_masks' in batch[0].keys():
+            keys.extend(['box_masks'])
+
+        if 'attribute_labels' in batch[0].keys():
+            keys.extend(['attribute_labels'])
+
+        if 'attribute_ids' in batch[0].keys():
+            keys.extend(['attribute_ids'])
+
+        if 'attribute_label_dicts' in batch[0].keys():
+            keys.extend(['attribute_label_dicts'])
+
+        if 'disease_labels' in batch[0].keys():
+            keys.extend(['disease_labels'])
+
+        batch_dict = {key: [sample[key] for sample in batch] for key in keys}
+
+        reports_ids, reports_masks, seq_lengths, = batch_dict['text'], batch_dict['mask'], batch_dict['seq_length']
+
+        batch_dict['image'] = torch.stack(batch_dict['image'], 0)
+        max_seq_length = max(seq_lengths)
+
+        targets = np.zeros((len(reports_ids), max_seq_length), dtype=int)
+        targets_masks = np.zeros((len(reports_ids), max_seq_length), dtype=int)
+
+        for i, report_ids in enumerate(reports_ids):
+            targets[i, :len(report_ids)] = report_ids
+
+        for i, report_masks in enumerate(reports_masks):
+            targets_masks[i, :len(report_masks)] = report_masks
+
+        batch_dict['text'] = torch.LongTensor(targets)
+        batch_dict['mask'] = torch.FloatTensor(targets_masks)
+
+        if 'boxes' in batch[0].keys():
+            boxes, labels = batch_dict['boxes'], batch_dict['box_labels']
+            box_abnormal_labels = batch_dict['box_abnormal_labels']
+            boxes_, labels_, box_abnormal_labels_ = [], [], []
+            for i, (box, label, box_abnormal_label) in enumerate(zip(boxes, labels, box_abnormal_labels)):
+                num_box = len(box)
+                box_with_id = torch.zeros(num_box, 5)
+                box_with_id[:, 0] = i
+                box_with_id[:, 1:] = box
+                boxes_.append(box_with_id)
+                labels_.append(torch.from_numpy(label))
+                box_abnormal_labels_.append(box_abnormal_label)
+
+            batch_dict['boxes'] = torch.cat(boxes_, dim=0)
+            batch_dict['box_labels'] = torch.cat(labels_, dim=0)
+            batch_dict['box_abnormal_labels'] = torch.cat(box_abnormal_labels_, dim=0)
+
+        if 'region_labels' in batch[0].keys():
+            batch_dict['region_labels'] = torch.cat(batch_dict['region_labels'], dim=0)
+
+        if 'box_masks' in batch[0].keys():
+            batch_dict['box_masks'] = torch.cat(batch_dict['box_masks'], dim=0)
+
+        if 'attribute_ids' in batch[0].keys():
+            attribute_labels =[torch.from_numpy(att_labels) for att_labels in batch_dict['attribute_labels']]
+            # ensure the order is the same as the box ann
+            batch_dict['attribute_labels'] = torch.cat(attribute_labels,dim=-1)
+
+            attribute_ids = batch_dict['attribute_ids']
+            max_att = max([att_id[-1] for att_id in attribute_ids])
+            total_att = sum([len(att_id)-1 for att_id in attribute_ids])
+
+            attribute_ids_ = torch.full((total_att, max_att), -10000,dtype=torch.long)  # att_pad_idx is -1e4
+
+            cur_idx = 0
+            for att_ids in attribute_ids:
+                for att_id in att_ids[:-1]:
+                    attribute_ids_[cur_idx, :len(att_id)] = torch.LongTensor(att_id)
+                    cur_idx+=1
+
+            assert cur_idx == len(attribute_ids_), f'{cur_idx} is not equal to the length of attribute_ids_ {len(attribute_ids_)}'
+            batch_dict['attribute_ids'] = attribute_ids_
 
         if 'disease_labels' in batch[0].keys():
             batch_dict['disease_labels'] = torch.cat(batch_dict['disease_labels'], dim=0)
