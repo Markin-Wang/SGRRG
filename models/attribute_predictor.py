@@ -21,11 +21,11 @@ class AttributePredictor(nn.Module):
         self.use_amp = config['use_amp']
         self.roi_pool = RoIPool(output_size=[self.output_size, self.output_size],
                                 spatial_scale= self.spatial_scale)
-        # self.disr_cls = config['disr_cls']
-        # self.disr_opt = config['disr_opt']
-        # if self.disr_opt == 'cls':
-        #     self.disr_head = nn.Linear(config['d_vf'], 1)
-        #     self.disr_head.apply(init_weights)
+        self.disr_cls = config['disr_cls']
+        self.disr_opt = config['disr_opt']
+        if self.disr_opt == 'cls':
+            self.disr_head = nn.Linear(config['d_vf'], 1)
+            self.disr_head.apply(init_weights)
 
         # self.conv = nn.Conv2d(in_channels=self.feature_size, out_channels=self.feature_size,
         #                       kernel_size=self.output_size,
@@ -83,10 +83,10 @@ class AttributePredictor(nn.Module):
         x = self.roi_pool(x, boxes)  # box feasts, N x C x output_size x output_size
         x = torch.flatten(x, 1)
         x = self.ff(x)  # [bs, C, H(1), W(1)]
-        # if self.disr_cls:
-        #     disr_logits = self.disr_head(x)
-        # else:
-        #     disr_logits = None
+        if self.disr_cls:
+            disr_logits = self.disr_head(x)
+        else:
+            disr_logits = None
 
         logits = torch.full((x.shape[0], self.max_att), self.att_pad_idx, device=x.device,
                             dtype=torch.float16 if self.use_amp else x.dtype)
@@ -96,4 +96,4 @@ class AttributePredictor(nn.Module):
             logits_i = self.attribute_heads[label_id](x[sample_ids])
             logits[sample_ids, :id2cat[label_id]] = logits_i
         # box order to form the logits
-        return x, logits
+        return x, logits, disr_logits
