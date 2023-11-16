@@ -148,7 +148,12 @@ class SceneGraphEncoder(nn.Module):
         # else:
         #     disr_logits = None
 
-        sg_embeds, sg_masks, obj_embeds, obj_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks, batch_size)
+        sg_embeds = torch.mean(sg_embeds,dim=1)
+
+        obj_embeds, obj_masks = None, None
+
+        #sg_embeds, sg_masks, obj_embeds, obj_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks, batch_size)
+        sg_embeds, sg_masks = self._to_bs_format_avg(boxes[:, 0], sg_embeds, batch_size)
 
         return sg_embeds, sg_masks, obj_embeds, obj_masks
 
@@ -217,6 +222,19 @@ class SceneGraphEncoder(nn.Module):
 
         return reformed_node_embeds, reformed_node_masks.unsqueeze(
             1), reformed_obj_embeds, reformed_obj_masks
+
+    def _to_bs_format_avg(self, bs_ids, node_embeds, batch_size):
+        bs_len = [(bs_ids==i).sum() for i in range(batch_size)]
+        max_len = max(bs_len)
+        reformed_node_embeds = torch.zeros(batch_size, max_len, node_embeds.shape[-1], device=node_embeds.device)
+        reformed_node_masks = torch.full((batch_size, max_len), torch.finfo(node_embeds.dtype).min,
+                                         device=node_embeds.device)
+        for i in range(batch_size):
+            reformed_node_embeds[i, :bs_len[i]] = node_embeds[bs_ids==i]
+            reformed_node_masks[i, :bs_len[i]] = 0.0
+
+
+        return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
 
 
 class SGEncoder(nn.Module):
