@@ -148,7 +148,7 @@ class SceneGraphEncoder(nn.Module):
         # else:
         #     disr_logits = None
 
-        sg_embeds = torch.mean(sg_embeds,dim=1)
+        sg_embeds, _ = torch.max(sg_embeds,dim=1)
 
         obj_embeds, obj_masks = None, None
 
