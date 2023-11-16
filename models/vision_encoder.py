@@ -75,7 +75,7 @@ class SceneGraphAidedEncoderLayer(nn.Module):
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 3)
 
     def forward(self, x, self_mask, sg_embeds, cross_mask):
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
+
         selected_bs = (cross_mask.squeeze(1) == 0).sum(-1) != 0
         # cross_mask bs x 1 x len_sg
         x_, sg_embeds_, cross_mask_ = x[selected_bs], sg_embeds[selected_bs], cross_mask[selected_bs]
@@ -84,6 +84,9 @@ class SceneGraphAidedEncoderLayer(nn.Module):
             x[selected_bs] = x_
         elif self.fuse_opt == 'cat':
             x[selected_bs] = self.fuse_proj(torch.cat([x[selected_bs],x_],dim=-1)).to(dtype=x.dtype) # fp16 to fp32
+
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
+
 
         return self.sublayer[2](x, self.feed_forward), self.cross_attn.attn
 
