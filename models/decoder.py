@@ -93,6 +93,8 @@ class SceneGraphAidedDecoderLayer(nn.Module):
     def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
 
+        x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
+
         selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
         # cross_mask bs x 1 x len_sg
         x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
@@ -101,8 +103,6 @@ class SceneGraphAidedDecoderLayer(nn.Module):
             x[selected_bs] = x_
         elif self.fuse_opt == 'cat':
             x[selected_bs] = self.fuse_proj(torch.cat([x[selected_bs],x_],dim=-1)).to(dtype=x.dtype)
-
-        x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
 
         return self.sublayer[3](x, self.feed_forward), self.cross_attn_img.attn
 
