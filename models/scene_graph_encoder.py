@@ -64,11 +64,11 @@ class SceneGraphEncoder(nn.Module):
         self.sg_encoder = SGEncoder(config)
         self.sg_encoder.apply(init_weights)
 
-        # self.disr_cls = config['disr_cls']
-        # self.disr_opt = config['disr_opt']
-        # if self.disr_opt == 'cls':
-        #     self.disr_head = nn.Linear(self.hidden_size, 1)
-        #     self.disr_head.apply(init_weights)
+        self.disr_cls = config['disr_cls']
+        self.disr_opt = config['disr_opt']
+        if self.disr_opt == 'cls':
+            self.disr_head = nn.Linear(self.hidden_size, 1)
+            self.disr_head.apply(init_weights)
 
         # attribute_masks = torch.full((self.num_classes, self.num_attributes), False)
         # for i in range(attribute_masks.shape[0]):
@@ -143,19 +143,22 @@ class SceneGraphEncoder(nn.Module):
         else:
             raise NotImplementedError
 
-        # if self.disr_cls and self.disr_opt=='cls':
-        #     disr_logits = self.disr_head(sg_embeds[:,0]) # the first column is the region embeds with the same order
-        # else:
-        #     disr_logits = None
 
         sg_embeds, _ = torch.max(sg_embeds,dim=1)
+
+
+        if self.disr_cls and self.disr_opt=='cls':
+            # disr_logits = self.disr_head(sg_embeds[:,0]) # the first column is the region embeds with the same order
+            disr_logits = self.disr_head(sg_embeds)  # the first column is the region embeds with the same order
+        else:
+            disr_logits = None
 
         obj_embeds, obj_masks = None, None
 
         #sg_embeds, sg_masks, obj_embeds, obj_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks, batch_size)
         sg_embeds, sg_masks = self._to_bs_format_avg(boxes[:, 0], sg_embeds, batch_size)
 
-        return sg_embeds, sg_masks, obj_embeds, obj_masks
+        return sg_embeds, sg_masks, obj_embeds, obj_masks, disr_logits
 
     def _prepare_att(self, att_labels):
         max_len = max(torch.sum(att_labels, dim=1))
