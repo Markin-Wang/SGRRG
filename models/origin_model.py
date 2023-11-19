@@ -240,7 +240,7 @@ class RRGModel(nn.Module):
                              # 'no_box_ids': no_box_ids,
                              'sg_embeds': sg_embeds if self.sgade else None,
                              'sg_masks': sg_masks if self.sgade else None,
-                             'bs_ids': boxes[:, 0],
+                             'bs_ids': boxes[:, 0] if self.use_sg else None,
                              })
 
         return return_dicts

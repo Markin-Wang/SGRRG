@@ -45,11 +45,20 @@ class Decoder(nn.Module):
 
     def forward(self, x, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None, bs_ids=None):
         attns = []
-        pre_tsg_masks, max_nodes = None, None
+        pre_tsg_masks, max_nodes, sg_embeds_avg = None, None, None
         for layer in self.layers:
             if self.sgade:
+                if self.hierarchical_attentino:
+                    sg_masks_index = sg_masks == 0
+
+                    sg_embeds_avg = [torch.max(sg_embeds[i, sg_masks_index[i, 0]], dim=0, keepdim=True)[0]
+                                     if self.pooling == 'max' else
+                                     torch.mean(sg_embeds[i, sg_masks_index[i, 0]], dim=0, keepdim=True)
+                                     for i in range(sg_embeds.shape[0])
+                                     ]
+                    sg_embeds_avg = torch.cat(sg_embeds_avg, dim=0)
                 x, attn, max_nodes, pre_tsg_masks = layer(x, img_feats, self_mask, cross_mask, sg_embeds, sg_masks,
-                                                          bs_ids, pre_tsg_masks, max_nodes)
+                                                          bs_ids, sg_embeds_avg, pre_tsg_masks, max_nodes)
             else:
                 x, attn = layer(x, img_feats, self_mask, cross_mask)
 
@@ -97,15 +106,17 @@ class SceneGraphAidedDecoderLayer(nn.Module):
 
         if self.hierarchical_attention:
             self.cross_attn_subgraph = MultiHeadedAttention(self.num_heads, self.d_model)
-            self.cross_attn_whole = MultiHeadedAttention(self.num_heads, self.d_model)
+            # self.cross_attn_whole = MultiHeadedAttention(self.num_heads, self.d_model)
+            self.aggregate_attn = AggregateAttention(self.d_model, h=1)
         else:
             self.cross_attn_sg = MultiHeadedAttention(self.num_heads, self.d_model)
 
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 4)
 
-    def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, bs_ids=None, pre_tsg_masks=None,
-                max_nodes=None):
+    def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, bs_ids=None, sg_embeds_avg=None,
+                pre_tsg_masks=None, max_nodes=None):
+
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
 
         x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
@@ -113,23 +124,25 @@ class SceneGraphAidedDecoderLayer(nn.Module):
         if self.hierarchical_attention:
             x_ = x[bs_ids.long()]  # expand to make each sub-graph in a sample has the same image query
             x_ = self.cross_attn_subgraph(x_, sg_embeds, sg_embeds, sg_masks)
+            # [num_boxes, num_token, hs]
             if pre_tsg_masks is None:
                 num_nodes = [(bs_ids == i).sum() for i in range(x.shape[0])]
                 max_nodes = max(num_nodes)
-                sg_embeds = torch.zeros((x.shape[0], max_nodes, x_.shape[-1]), device=x_.device, dtype=x_.dtype)
-                pre_tsg_masks = torch.full((x.shape[0], max_nodes), torch.finfo(sg_embeds.dtype).min,
+                # [bs, num_token, num_subgraph, hs]
+                sg_embeds = torch.zeros((x.shape[0], x.shape[1], max_nodes, x_.shape[-1]), device=x_.device, dtype=x_.dtype)
+                pre_tsg_masks = torch.full((x.shape[0], x.shape[1], max_nodes), torch.finfo(sg_embeds.dtype).min,
                                            device=sg_embeds.device)
                 for i in range(x.shape[0]):
-                    print(x_[bs_ids == i].shape,sg_embeds.shape )
-                    sg_embeds[i, :num_nodes[i]] = x_[bs_ids == i]
-                    pre_tsg_masks[i, :num_nodes[i]] = 0.0
+                    print(x_[bs_ids == i].shape, sg_embeds.shape)
+                    sg_embeds[i, :, :num_nodes[i]] = x_[bs_ids == i]
+                    pre_tsg_masks[i, :, :num_nodes[i]] = 0.0
 
             else:
-                sg_embeds = torch.zeros((x.shape[0] * max_nodes, x_.shape[-1]), device=x_.device, dtype=x_.dtype)
+                sg_embeds = torch.zeros((x.shape[0], x.shape[1], max_nodes, x_.shape[-1]), device=x_.device, dtype=x_.dtype)
                 sg_embeds[(pre_tsg_masks == 0).view(-1)] = x_
                 sg_embeds = sg_embeds.view(x.shape[0], max_nodes, x_.shape[-1])
 
-            x_ = self.sublayer[2](x_, lambda x: self.cross_attn_whole(x, sg_embeds, sg_embeds,
+            x_ = self.sublayer[2](x, lambda x: self.aggregate_attn(x, sg_embeds_avg, sg_embeds,
                                                                       pre_tsg_masks.unsqueeze(1)))
             selected_bs = pre_tsg_masks.sum(-1) != 0
             x[selected_bs] = x_
@@ -211,6 +224,43 @@ class MultiHeadedAttention(nn.Module):
             p_attn = self.dropout(p_attn)
 
         self.attn = p_attn
+        x = torch.matmul(p_attn, value)
+
+        x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
+        return self.linears[-1](x)
+
+
+class AggregateAttention(nn.Module):
+    def __init__(self, d_model, h=1, dropout=0):
+        super(AggregateAttention, self).__init__()
+        self.d_k = d_model // h
+        self.h = h
+        self.linears = clones(nn.Linear(d_model, d_model), 3)
+        if dropout > 0:
+            self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, query, key, value, mask=None):
+        if mask is not None:
+            mask = mask.unsqueeze(1)
+        nbatches = query.size(0)
+        query, key, value = [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2) for l, x in
+                             zip(self.linears, (query, key, value))]
+
+        # x, self.attn = attention(query, key, value, mask=mask, dropout=self.dropout)
+        d_k = query.size(-1)
+
+        scores = (torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k))
+
+        if mask is not None:
+            scores = scores + mask
+
+        p_attn = F.softmax(scores, dim=-1)
+
+        if self.dropout is not None:
+            p_attn = self.dropout(p_attn)
+
+        # self.attn = p_attn
+
         x = torch.matmul(p_attn, value)
 
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
