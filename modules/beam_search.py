@@ -18,6 +18,7 @@ class BeamSearch:
         self.bos_idx = config['bos_idx']
         self.sgade = config['sgade']
         self.use_sg = config['use_sg']
+        self.hierarchical_attention = config['hierarchical_attention']
 
     def set_tokenidx(self, tokenizer):
         self.pad_idx = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
@@ -71,10 +72,12 @@ class BeamSearch:
                     image_embeds = image_embeds.view(bs, 1, -1, hs).repeat(1, self.beam_size, 1, 1).view(search_size,
                                                                                                          -1, hs)
                     if sg_embeds is not None and self.sgade:
-                        sg_embeds = sg_embeds.view(bs, 1, -1, hs).repeat(1, self.beam_size, 1, 1).view(search_size, -1,
-                                                                                                       hs)
-                        sg_masks = sg_masks.view(bs, 1, -1, sg_masks.shape[-1]).repeat(1, self.beam_size, 1, 1).view(
-                            search_size, -1, sg_masks.shape[-1])
+                        new_sg_size = sg_embeds.size(0) * self.beam_size
+                        sg_embeds = sg_embeds.view(sg_embeds.size(0), 1, -1, hs)
+                        sg_embeds = sg_embeds.repeat(1, self.beam_size, 1, 1).view(new_sg_size, -1, hs)
+                        sg_masks = sg_masks.view(sg_masks.size(0), 1, -1, sg_masks.shape[-1])
+                        sg_masks = sg_masks.repeat(1, self.beam_size, 1, 1).view(new_sg_size, -1, sg_masks.shape[-1])
+
                         bs_ids = bs_ids.view(bs_ids.size(0), 1).repeat(1, self.beam_size) * self.beam_size
                         shift = torch.arange(0, self.beam_size).view(-1, self.beam_size).repeat(bs_ids.size(0), 1).to(
                             bs_ids.device)

@@ -34,7 +34,7 @@ class Decoder(nn.Module):
         self.drop_prob_lm = config['drop_prob_lm']
         self.use_sg = config['use_sg']
         self.sgade = config['sgade']
-        self.hierarchical_attentino = config['hierarchical_attention']
+        self.hierarchical_attention = config['hierarchical_attention']
 
         if self.sgade:
             assert self.use_sg
@@ -45,25 +45,46 @@ class Decoder(nn.Module):
 
     def forward(self, x, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None, bs_ids=None):
         attns = []
-        pre_tsg_masks, max_nodes, sg_embeds_avg = None, None, None
+        pre_tsg_masks, max_nodes, sg_embeds_pool, sg_embeds_pool_masks = None, None, None, None
+        if self.sgade:
+            if self.hierarchical_attention:
+                sg_embeds_pool, sg_embeds_pool_masks = self._to_bs_format_pool(bs_ids, sg_embeds, sg_masks,
+                                                                               x.shape[0])
+                selected_bs = (sg_embeds_pool_masks.squeeze(1) == 0).sum(-1) != 0
+            else:
+                selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
         for layer in self.layers:
             if self.sgade:
-                if self.hierarchical_attentino:
-                    sg_masks_index = sg_masks == 0
-
-                    sg_embeds_avg = [torch.max(sg_embeds[i, sg_masks_index[i, 0]], dim=0, keepdim=True)[0]
-                                     if self.pooling == 'max' else
-                                     torch.mean(sg_embeds[i, sg_masks_index[i, 0]], dim=0, keepdim=True)
-                                     for i in range(sg_embeds.shape[0])
-                                     ]
-                    sg_embeds_avg = torch.cat(sg_embeds_avg, dim=0)
                 x, attn, max_nodes, pre_tsg_masks = layer(x, img_feats, self_mask, cross_mask, sg_embeds, sg_masks,
-                                                          bs_ids, sg_embeds_avg, pre_tsg_masks, max_nodes)
+                                                          bs_ids, selected_bs, sg_embeds_pool, sg_embeds_pool_masks,
+                                                          pre_tsg_masks, max_nodes)
             else:
                 x, attn = layer(x, img_feats, self_mask, cross_mask)
 
             # attns.append(attn)
         return self.norm(x), attns
+
+    def _to_bs_format_pool(self, bs_ids, node_embeds, node_masks, batch_size):
+
+        bs_len = [(bs_ids == i).sum() for i in range(batch_size)]
+        node_masks = node_masks == 0
+
+        node_embeds = [torch.max(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)[0]
+                       # if self.pooling == 'max' else
+                       # torch.mean(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)
+                       for i in range(node_embeds.shape[0])
+                       ]
+        node_embeds = torch.cat(node_embeds, dim=0)
+
+        max_len = max(bs_len)
+        reformed_node_embeds = torch.zeros(batch_size, max_len, node_embeds.shape[-1], device=node_embeds.device)
+        reformed_node_masks = torch.full((batch_size, max_len), torch.finfo(node_embeds.dtype).min,
+                                         device=node_embeds.device)
+        for i in range(batch_size):
+            reformed_node_embeds[i, :bs_len[i]] = node_embeds[bs_ids == i]
+            reformed_node_masks[i, :bs_len[i]] = 0.0
+
+        return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
 
 
 class DecoderLayer(nn.Module):
@@ -114,8 +135,8 @@ class SceneGraphAidedDecoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 4)
 
-    def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, bs_ids=None, sg_embeds_avg=None,
-                pre_tsg_masks=None, max_nodes=None):
+    def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, bs_ids=None, selected_bs=None,
+                sg_embeds_avg=None, sg_embeds_avg_masks=None, pre_tsg_masks=None, max_nodes=None):
 
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
 
@@ -126,29 +147,33 @@ class SceneGraphAidedDecoderLayer(nn.Module):
             x_ = self.cross_attn_subgraph(x_, sg_embeds, sg_embeds, sg_masks)
             # [num_boxes, num_token, hs]
             if pre_tsg_masks is None:
-                num_nodes = [(bs_ids == i).sum() for i in range(x.shape[0])]
+                num_nodes = [(bs_ids == i).sum() for i in range(x_.shape[0])]
                 max_nodes = max(num_nodes)
                 # [bs, num_token, num_subgraph, hs]
-                sg_embeds = torch.zeros((x.shape[0], x.shape[1], max_nodes, x_.shape[-1]), device=x_.device, dtype=x_.dtype)
-                pre_tsg_masks = torch.full((x.shape[0], x.shape[1], max_nodes), torch.finfo(sg_embeds.dtype).min,
+                sg_embeds = torch.zeros((x.shape[0], max_nodes, x.shape[1], x_.shape[-1]), device=x_.device,
+                                        dtype=x_.dtype)
+                pre_tsg_masks = torch.full((x.shape[0], max_nodes), torch.finfo(sg_embeds.dtype).min,
                                            device=sg_embeds.device)
+
                 for i in range(x.shape[0]):
-                    print(x_[bs_ids == i].shape, sg_embeds.shape)
-                    sg_embeds[i, :, :num_nodes[i]] = x_[bs_ids == i]
-                    pre_tsg_masks[i, :, :num_nodes[i]] = 0.0
+                    # print(x_[bs_ids == i].shape, sg_embeds.shape, sg_embeds_avg.shape)
+                    sg_embeds[i, :num_nodes[i]] = x_[bs_ids == i]
+                    pre_tsg_masks[i, :num_nodes[i]] = 0.0
 
             else:
-                sg_embeds = torch.zeros((x.shape[0], x.shape[1], max_nodes, x_.shape[-1]), device=x_.device, dtype=x_.dtype)
+                sg_embeds = torch.zeros((x.shape[0] * max_nodes, x.shape[1], x_.shape[-1]), device=x_.device,
+                                        dtype=x_.dtype)
                 sg_embeds[(pre_tsg_masks == 0).view(-1)] = x_
-                sg_embeds = sg_embeds.view(x.shape[0], max_nodes, x_.shape[-1])
+                sg_embeds = sg_embeds.view(x.shape[0], max_nodes, x_.shape[1], x_.shape[-1])
+            # only perform attention for those samples having the sg
 
-            x_ = self.sublayer[2](x, lambda x: self.aggregate_attn(x, sg_embeds_avg, sg_embeds,
-                                                                      pre_tsg_masks.unsqueeze(1)))
-            selected_bs = pre_tsg_masks.sum(-1) != 0
+            x_ = self.sublayer[2](x[selected_bs],lambda x: self.aggregate_attn(x, sg_embeds_avg[selected_bs],
+                                                                               sg_embeds[selected_bs],
+                                                                               sg_embeds_avg_masks[selected_bs]))
+
             x[selected_bs] = x_
 
         else:
-            selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
             # cross_mask bs x 1 x len_sg
             x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
             x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
@@ -231,20 +256,27 @@ class MultiHeadedAttention(nn.Module):
 
 
 class AggregateAttention(nn.Module):
-    def __init__(self, d_model, h=1, dropout=0):
+    def __init__(self, d_model, h=1, dropout=0.1):
         super(AggregateAttention, self).__init__()
         self.d_k = d_model // h
         self.h = h
-        self.linears = clones(nn.Linear(d_model, d_model), 3)
+        self.linears = clones(nn.Linear(d_model, d_model), 4)
         if dropout > 0:
             self.dropout = nn.Dropout(p=dropout)
+        else:
+            self.dropout = None
 
     def forward(self, query, key, value, mask=None):
         if mask is not None:
             mask = mask.unsqueeze(1)
         nbatches = query.size(0)
-        query, key, value = [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2) for l, x in
-                             zip(self.linears, (query, key, value))]
+        query, key = [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2) for l, x in
+                      zip(self.linears, (query, key))]
+
+        # from [bs, max_nodes, num_len, head, dhs] to [bs, num_head, num_len, max_node, dhs]
+        # print(1111,value.shape)
+        value = self.linears[2](value).view(nbatches, value.size(1), value.size(2), self.h, self.d_k).transpose(1, 3)
+        # print(2222,value.shape)
 
         # x, self.attn = attention(query, key, value, mask=mask, dropout=self.dropout)
         d_k = query.size(-1)
@@ -259,11 +291,16 @@ class AggregateAttention(nn.Module):
         if self.dropout is not None:
             p_attn = self.dropout(p_attn)
 
+        # print(3333, p_attn.shape, value.shape)
+
         # self.attn = p_attn
 
-        x = torch.matmul(p_attn, value)
+        # p_attn to [bs, num_head, num_token, 1, max_node]
+        x = torch.matmul(p_attn.unsqueeze(-2), value).squeeze(-2)
+        # x [bs, num_head, num_token, 1, d_model]
 
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
+        # print(4444,x.shape)
         return self.linears[-1](x)
 
 
