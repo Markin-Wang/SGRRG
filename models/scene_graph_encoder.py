@@ -36,7 +36,11 @@ class SceneGraphEncoder(nn.Module):
         self.all_box_count = 0
         self.max_att = max(id2cat)
         self.num_diseases = config['num_diseases']
+        self.pooling = config['pooling']
+        self.hierarchical_attention = config['hierarchical_attention']
 
+        assert not (
+                self.pooling is not None and self.hierarchical_attention), 'pooling and hierarchical attention cannot be both enabled '
 
         if self.use_region_type_embed:
             self.token_type_embeddings = nn.Embedding(self.num_classes + 1, self.hidden_size)
@@ -143,20 +147,20 @@ class SceneGraphEncoder(nn.Module):
         else:
             raise NotImplementedError
 
-
-        sg_embeds, _ = torch.max(sg_embeds,dim=1)
-
+        if self.pooling is not None:
+            # sg_embeds, _ = torch.max(sg_embeds, dim=1)
+            sg_embeds, sg_masks = self._to_bs_format_pool(boxes[:, 0], sg_embeds, node_masks, batch_size)
+            obj_embeds, obj_masks = None, None
+        elif self.hierarchical_attention:
+            sg_masks = node_masks
+        else:
+            sg_embeds, sg_masks, obj_embeds, obj_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks,
+                                                                            batch_size)
 
         # if self.disr_cls and self.disr_opt=='cls':
         #     # disr_logits = self.disr_head(sg_embeds[:,0]) # the first column is the region embeds with the same order
         #     disr_logits = self.disr_head(sg_embeds)  # the first column is the region embeds with the same order
         # else:
-        #     disr_logits = None
-
-        obj_embeds, obj_masks = None, None
-
-        #sg_embeds, sg_masks, obj_embeds, obj_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks, batch_size)
-        sg_embeds, sg_masks = self._to_bs_format_avg(boxes[:, 0], sg_embeds, batch_size)
 
         return sg_embeds, sg_masks, obj_embeds, obj_masks
 
@@ -226,16 +230,25 @@ class SceneGraphEncoder(nn.Module):
         return reformed_node_embeds, reformed_node_masks.unsqueeze(
             1), reformed_obj_embeds, reformed_obj_masks
 
-    def _to_bs_format_avg(self, bs_ids, node_embeds, batch_size):
-        bs_len = [(bs_ids==i).sum() for i in range(batch_size)]
+    def _to_bs_format_pool(self, bs_ids, node_embeds, node_masks, batch_size):
+
+        bs_len = [(bs_ids == i).sum() for i in range(batch_size)]
+        node_masks = node_masks == 0
+
+        node_embeds = [torch.max(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)[0]
+                       if self.pooling == 'max' else
+                       torch.mean(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)
+                       for i in range(node_embeds.shape[0])
+                       ]
+        node_embeds = torch.cat(node_embeds, dim=0)
+
         max_len = max(bs_len)
         reformed_node_embeds = torch.zeros(batch_size, max_len, node_embeds.shape[-1], device=node_embeds.device)
         reformed_node_masks = torch.full((batch_size, max_len), torch.finfo(node_embeds.dtype).min,
                                          device=node_embeds.device)
         for i in range(batch_size):
-            reformed_node_embeds[i, :bs_len[i]] = node_embeds[bs_ids==i]
+            reformed_node_embeds[i, :bs_len[i]] = node_embeds[bs_ids == i]
             reformed_node_masks[i, :bs_len[i]] = 0.0
-
 
         return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
 

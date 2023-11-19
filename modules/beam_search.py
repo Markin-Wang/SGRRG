@@ -32,7 +32,7 @@ class BeamSearch:
         if not model.training:
             # from fairseq
             image_embeds = batch_dict['encoded_img_feats']
-            sg_embeds, sg_masks = batch_dict['sg_embeds'], batch_dict['sg_masks']
+            sg_embeds, sg_masks, bs_ids = batch_dict['sg_embeds'], batch_dict['sg_masks'], batch_dict['bs_ids']
             bs = image_embeds.size(0)
             text_ids = torch.ones((bs, max_len), device=image_embeds.device, dtype=torch.long)
             text_ids[:, 0] = self.bos_idx
@@ -43,14 +43,14 @@ class BeamSearch:
             self_masks = torch.zeros((bs, max_len), device=image_embeds.device)
             self_masks[:, 0] = 1
 
-            text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks)
+            text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks, bs_ids)
 
             self_masks = self_masks.view(bs, 1, -1).repeat(1, self.beam_size, 1).view(search_size, -1)
 
             for i in range(max_len - 1):
                 self_masks[:, i] = 1
                 if i != 0:
-                    text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks)
+                    text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks, bs_ids)
 
                 mlm_logits = model.rrg_head(text_feats[:, i: i + 1])
 
@@ -75,6 +75,11 @@ class BeamSearch:
                                                                                                        hs)
                         sg_masks = sg_masks.view(bs, 1, -1, sg_masks.shape[-1]).repeat(1, self.beam_size, 1, 1).view(
                             search_size, -1, sg_masks.shape[-1])
+                        bs_ids = bs_ids.view(bs_ids.size(0), 1).repeat(1, self.beam_size) * self.beam_size
+                        shift = torch.arange(0, self.beam_size).view(-1, self.beam_size).repeat(bs_ids.size(0), 1).to(
+                            bs_ids.device)
+                        bs_ids = (bs_ids + shift).view(-1)
+
                     text_ids[:, i + 1] = tgt_prev_tokens.view(-1)
                     # end_seq = (tgt_prev_tokens == tokenizer.sep_token_id) | (tgt_prev_tokens == tokenizer.pad_token_id)
                     end_seq = tgt_prev_tokens == self.pad_idx

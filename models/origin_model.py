@@ -76,15 +76,15 @@ class RRGModel(nn.Module):
             self.dis_head = DiseaseHead(config=config)
 
         if self.region_cls:
-            self.region_selector = RegionSelector(config) # init in that module
+            self.region_selector = RegionSelector(config)  # init in that module
 
         if self.att_cls:
             assert self.region_cls, "To perform attribute classification, region classification should be enabled."
-            self.attribute_predictor = AttributePredictor(config) # init in that module
+            self.attribute_predictor = AttributePredictor(config)  # init in that module
 
         if self.use_sg:
             assert self.att_cls and self.region_cls, 'region cls and attribute cls should be enabled.'
-            self.scene_graph_encoder = SceneGraphEncoder(config) # init in that module
+            self.scene_graph_encoder = SceneGraphEncoder(config)  # init in that module
 
     # if self.att_cls:
 
@@ -97,9 +97,9 @@ class RRGModel(nn.Module):
         patch_feats = self.get_img_feats(images)
         return self.encode_img_feats(patch_feats, seq)
 
-    def get_text_feats(self, text_ids, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None):
+    def get_text_feats(self, text_ids, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None, bs_ids=None):
         word_embed = self.word_embedding(text_ids)
-        word_embed = self.decoder(word_embed, img_feats, self_mask, cross_mask, sg_embeds, sg_masks)
+        word_embed = self.decoder(word_embed, img_feats, self_mask, cross_mask, sg_embeds, sg_masks, bs_ids)
         return word_embed
 
     def extract_img_feats(self, images):
@@ -156,7 +156,8 @@ class RRGModel(nn.Module):
             patch_feats = self.encode_img_feats(patch_feats, att_masks)
 
         text_embed, align_attns = self.get_text_feats(seq, patch_feats, self_mask=seq_masks, cross_mask=att_masks,
-                                                      sg_embeds=sg_embeds, sg_masks=sg_masks)
+                                                      sg_embeds=sg_embeds, sg_masks=sg_masks,
+                                                      bs_ids=boxes[:, 0] if self.use_sg else None)
         # output, align_attns = self.encoder_decoder(encoded_img_feats, seq, att_masks, seq_mask)
         output = self.rrg_head(text_embed)
 
@@ -197,7 +198,8 @@ class RRGModel(nn.Module):
             #         no_box_ids.append(batch_dict['img_id'][i])
 
         if self.att_cls:
-            box_feats, att_logits, disr_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks=box_masks)
+            box_feats, att_logits, disr_logits = self.attribute_predictor(patch_feats, boxes, box_labels,
+                                                                          box_masks=box_masks)
             att_probs = torch.sigmoid(att_logits)
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
             # print(f'{len(boxes)/patch_feats.shape[0]:.2f} regions are selected to describe.')
@@ -238,6 +240,7 @@ class RRGModel(nn.Module):
                              # 'no_box_ids': no_box_ids,
                              'sg_embeds': sg_embeds if self.sgade else None,
                              'sg_masks': sg_masks if self.sgade else None,
+                             'bs_ids': boxes[:, 0],
                              })
 
         return return_dicts
@@ -258,7 +261,7 @@ class RRGModel(nn.Module):
 
         return out, [ys.unsqueeze(0)]
 
-    def infer(self, text_ids, patch_feats, self_masks, cross_masks=None, sg_embeds=None, sg_masks=None):
+    def infer(self, text_ids, patch_feats, self_masks, cross_masks=None, sg_embeds=None, sg_masks=None, bs_ids=None):
 
         self_masks = self_masks[:, None, :].expand(patch_feats.size(0), text_ids.size(-1), text_ids.size(-1))
         self_masks = 1.0 - self_masks
@@ -267,7 +270,7 @@ class RRGModel(nn.Module):
             patch_feats.device)  # use add attention instead of filling
         self_masks = self_masks + sub_mask
 
-        out, attns = self.get_text_feats(text_ids, patch_feats, self_masks, cross_masks, sg_embeds, sg_masks)
+        out, attns = self.get_text_feats(text_ids, patch_feats, self_masks, cross_masks, sg_embeds, sg_masks, bs_ids)
 
         return out
 

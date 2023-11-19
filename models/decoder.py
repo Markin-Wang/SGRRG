@@ -34,6 +34,7 @@ class Decoder(nn.Module):
         self.drop_prob_lm = config['drop_prob_lm']
         self.use_sg = config['use_sg']
         self.sgade = config['sgade']
+        self.hierarchical_attentino = config['hierarchical_attention']
 
         if self.sgade:
             assert self.use_sg
@@ -42,11 +43,17 @@ class Decoder(nn.Module):
             self.layers = clones(DecoderLayer(config), self.num_layers)
         self.norm = nn.LayerNorm(self.d_model)
 
-    def forward(self, x, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None):
+    def forward(self, x, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None, bs_ids=None):
         attns = []
+        pre_tsg_masks, max_nodes = None, None
         for layer in self.layers:
-            x, attn = layer(x, img_feats, self_mask, cross_mask, sg_embeds, sg_masks)
-            attns.append(attn)
+            if self.sgade:
+                x, attn, max_nodes, pre_tsg_masks = layer(x, img_feats, self_mask, cross_mask, sg_embeds, sg_masks,
+                                                          bs_ids, pre_tsg_masks, max_nodes)
+            else:
+                x, attn = layer(x, img_feats, self_mask, cross_mask)
+
+            # attns.append(attn)
         return self.norm(x), attns
 
 
@@ -65,7 +72,7 @@ class DecoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 3)
 
-    def forward(self, x, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None):
+    def forward(self, x, img_feats, self_mask, cross_mask):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
         x = self.sublayer[1](x, lambda x: self.cross_attn(x, img_feats, img_feats, cross_mask))
         return self.sublayer[2](x, self.feed_forward), self.cross_attn.attn
@@ -81,30 +88,63 @@ class SceneGraphAidedDecoderLayer(nn.Module):
         self.d_ff = config['d_ff']
         self.dropout = config['dropout']
         self.fuse_opt = config['fuse_opt']
+        self.hierarchical_attention = config['hierarchical_attention']
         if self.fuse_opt == 'cat':
-            self.fuse_proj = nn.Linear(self.d_model*2,self.d_model)
+            self.fuse_proj = nn.Linear(self.d_model * 2, self.d_model)
 
         self.self_attn = MultiHeadedAttention(self.num_heads, self.d_model)
         self.cross_attn_img = MultiHeadedAttention(self.num_heads, self.d_model)
-        self.cross_attn_sg = MultiHeadedAttention(self.num_heads, self.d_model)
+
+        if self.hierarchical_attention:
+            self.cross_attn_subgraph = MultiHeadedAttention(self.num_heads, self.d_model)
+            self.cross_attn_whole = MultiHeadedAttention(self.num_heads, self.d_model)
+        else:
+            self.cross_attn_sg = MultiHeadedAttention(self.num_heads, self.d_model)
+
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 4)
 
-    def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks):
+    def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, bs_ids=None, pre_tsg_masks=None,
+                max_nodes=None):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
 
         x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
 
-        selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
-        # cross_mask bs x 1 x len_sg
-        x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
-        x_ = self.sublayer[2](x_,lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_,sg_masks_))
-        if self.fuse_opt == 'att':
-            x[selected_bs] = x_
-        elif self.fuse_opt == 'cat':
-            x[selected_bs] = self.fuse_proj(torch.cat([x[selected_bs],x_],dim=-1)).to(dtype=x.dtype)
+        if self.hierarchical_attention:
+            x_ = x[bs_ids.long()]  # expand to make each sub-graph in a sample has the same image query
+            x_ = self.cross_attn_subgraph(x_, sg_embeds, sg_embeds, sg_masks)
+            if pre_tsg_masks is None:
+                num_nodes = [(bs_ids == i).sum() for i in range(x.shape[0])]
+                max_nodes = max(num_nodes)
+                sg_embeds = torch.zeros((x.shape[0], max_nodes, x_.shape[-1]), device=x_.device, dtype=x_.dtype)
+                pre_tsg_masks = torch.full((x.shape[0], max_nodes), torch.finfo(sg_embeds.dtype).min,
+                                           device=sg_embeds.device)
+                for i in range(x.shape[0]):
+                    print(x_[bs_ids == i].shape,sg_embeds.shape )
+                    sg_embeds[i, :num_nodes[i]] = x_[bs_ids == i]
+                    pre_tsg_masks[i, :num_nodes[i]] = 0.0
 
-        return self.sublayer[3](x, self.feed_forward), self.cross_attn_img.attn
+            else:
+                sg_embeds = torch.zeros((x.shape[0] * max_nodes, x_.shape[-1]), device=x_.device, dtype=x_.dtype)
+                sg_embeds[(pre_tsg_masks == 0).view(-1)] = x_
+                sg_embeds = sg_embeds.view(x.shape[0], max_nodes, x_.shape[-1])
+
+            x_ = self.sublayer[2](x_, lambda x: self.cross_attn_whole(x, sg_embeds, sg_embeds,
+                                                                      pre_tsg_masks.unsqueeze(1)))
+            selected_bs = pre_tsg_masks.sum(-1) != 0
+            x[selected_bs] = x_
+
+        else:
+            selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
+            # cross_mask bs x 1 x len_sg
+            x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
+            x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
+            if self.fuse_opt == 'att':
+                x[selected_bs] = x_
+            elif self.fuse_opt == 'cat':
+                x[selected_bs] = self.fuse_proj(torch.cat([x[selected_bs], x_], dim=-1)).to(dtype=x.dtype)
+
+        return self.sublayer[3](x, self.feed_forward), self.cross_attn_img.attn, max_nodes, pre_tsg_masks
 
 
 class MultiHeadedAttention(nn.Module):

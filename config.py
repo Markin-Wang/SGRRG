@@ -132,6 +132,8 @@ def config():
     use_focal_ls_r = False
     use_focal_ls_a = False
     encode_type = 'oa-c'
+    pooling = None
+    hierarchical_attention = False
     # object-attribute coupled (oa-c): node-att to node-att
     # object-attribute decomposed (oa-d): node to node-att then nodes to nodes
     # object-attribute decomposed completely (oa-dc): node to att then nodes to nodes
