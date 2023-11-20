@@ -44,14 +44,33 @@ class BeamSearch:
             self_masks = torch.zeros((bs, max_len), device=image_embeds.device)
             self_masks[:, 0] = 1
 
-            text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks, bs_ids)
+            past_data = {}
+            if self.use_sg:
+                if self.hierarchical_attention:
+                    sg_embeds_pool, sg_embeds_pool_masks = self._to_bs_format_pool(bs_ids, sg_embeds, sg_masks,
+                                                                                   image_embeds.shape[0])
+                    selected_bs = (sg_embeds_pool_masks.squeeze(1) == 0).sum(-1) != 0
+                    num_nodes = [(bs_ids == i).sum() for i in range(image_embeds.shape[0])]
+                    max_node = max(num_nodes)
+                    past_data.update({'sg_embeds_pool': sg_embeds_pool,
+                                      'sg_embeds_pool_masks': sg_embeds_pool_masks,
+                                      'selected_bs': selected_bs,
+                                      'max_node': max_node,
+                                      'num_nodes': num_nodes,
+                                      })
+                else:
+                    past_data['selected_bs'] = (sg_masks.squeeze(1) == 0).sum(-1) != 0
+
+            past_data['bs_ids'] = bs_ids
+
+            text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks, past_data)
 
             self_masks = self_masks.view(bs, 1, -1).repeat(1, self.beam_size, 1).view(search_size, -1)
 
             for i in range(max_len - 1):
                 self_masks[:, i] = 1
                 if i != 0:
-                    text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks, bs_ids)
+                    text_feats = model.infer(text_ids, image_embeds, self_masks, None, sg_embeds, sg_masks, past_data)
 
                 mlm_logits = model.rrg_head(text_feats[:, i: i + 1])
 
@@ -69,8 +88,9 @@ class BeamSearch:
                     padded = torch.full((search_size, 1), 1, dtype=torch.long, device=text_ids.device)
 
                     hs = image_embeds.size(-1)
-                    image_embeds = image_embeds.view(bs, 1, -1, hs).repeat(1, self.beam_size, 1, 1).view(search_size,
-                                                                                                         -1, hs)
+                    image_embeds = image_embeds.view(bs, 1, -1, hs).repeat(
+                        1, self.beam_size, 1, 1).view(search_size, -1, hs)
+
                     if sg_embeds is not None and self.sgade:
                         new_sg_size = sg_embeds.size(0) * self.beam_size
                         sg_embeds = sg_embeds.view(sg_embeds.size(0), 1, -1, hs)
@@ -78,10 +98,31 @@ class BeamSearch:
                         sg_masks = sg_masks.view(sg_masks.size(0), 1, -1, sg_masks.shape[-1])
                         sg_masks = sg_masks.repeat(1, self.beam_size, 1, 1).view(new_sg_size, -1, sg_masks.shape[-1])
 
-                        bs_ids = bs_ids.view(bs_ids.size(0), 1).repeat(1, self.beam_size) * self.beam_size
-                        shift = torch.arange(0, self.beam_size).view(-1, self.beam_size).repeat(bs_ids.size(0), 1).to(
-                            bs_ids.device)
-                        bs_ids = (bs_ids + shift).view(-1)
+                        selected_bs = past_data['selected_bs']
+                        past_data['selected_bs'] = selected_bs.view(selected_bs.size(0), 1).repeat(1, self.beam_size).view(-1)
+
+                        if self.hierarchical_attention:
+                            bs_ids = past_data['bs_ids']
+                            bs_ids = bs_ids.view(bs_ids.size(0), 1).repeat(1, self.beam_size) * self.beam_size
+
+                            shift = torch.arange(0, self.beam_size).view(
+                                -1, self.beam_size).repeat(bs_ids.size(0), 1).to(bs_ids.device)
+
+                            past_data['bs_ids'] = (bs_ids + shift).view(-1)
+
+                            sg_embeds_pool = past_data['sg_embeds_pool']
+                            past_data['sg_embeds_pool'] = sg_embeds_pool.view(sg_embeds_pool.size(0), 1, -1, hs).repeat(
+                                1, self.beam_size, 1, 1).view(search_size, -1, hs)
+
+                            num_node = past_data['sg_embeds_pool_masks'].shape[-1]
+                            sg_embeds_pool_masks = past_data['sg_embeds_pool_masks'].view(
+                                sg_embeds_pool.size(0), 1, -1, num_node)
+
+                            past_data['sg_embeds_pool_masks'] = sg_embeds_pool_masks.repeat(
+                                1, self.beam_size, 1, 1).view(search_size, -1, num_node)
+
+                            bs_ids = past_data['bs_ids']
+                            past_data['num_nodes'] = [(bs_ids == i).sum() for i in range(sg_embeds.shape[0])]
 
                     text_ids[:, i + 1] = tgt_prev_tokens.view(-1)
                     # end_seq = (tgt_prev_tokens == tokenizer.sep_token_id) | (tgt_prev_tokens == tokenizer.pad_token_id)
@@ -134,6 +175,28 @@ class BeamSearch:
             # captions = tokenizer.batch_decode(text_ids, skip_special_tokens=True)
         # return {"image_ids": batch["iid"], "captions": captions, "gts": gts}
         return {'preds': text_ids}
+
+    def _to_bs_format_pool(self, bs_ids, node_embeds, node_masks, batch_size):
+
+        bs_len = [(bs_ids == i).sum() for i in range(batch_size)]
+        node_masks = node_masks == 0
+
+        node_embeds = [torch.max(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)[0]
+                       # if self.pooling == 'max' else
+                       # torch.mean(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)
+                       for i in range(node_embeds.shape[0])
+                       ]
+        node_embeds = torch.cat(node_embeds, dim=0)
+
+        max_len = max(bs_len)
+        reformed_node_embeds = torch.zeros(batch_size, max_len, node_embeds.shape[-1], device=node_embeds.device)
+        reformed_node_masks = torch.full((batch_size, max_len), torch.finfo(node_embeds.dtype).min,
+                                         device=node_embeds.device)
+        for i in range(batch_size):
+            reformed_node_embeds[i, :bs_len[i]] = node_embeds[bs_ids == i]
+            reformed_node_masks[i, :bs_len[i]] = 0.0
+
+        return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
 
     # def beam_search_simplified(self, model, init_state, init_logprobs,patch_feats=None,mask=None):
     #

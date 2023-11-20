@@ -35,6 +35,7 @@ class RRGModel(nn.Module):
         self.use_sg = config['use_sg']
         self.sgave = config['sgave']
         self.sgade = config['sgade']
+        self.hierarchical_attention = config['hierarchical_attention']
         self.hidden_size = config['d_model']
         self.d_ff = config['d_ff']
 
@@ -97,9 +98,9 @@ class RRGModel(nn.Module):
         patch_feats = self.get_img_feats(images)
         return self.encode_img_feats(patch_feats, seq)
 
-    def get_text_feats(self, text_ids, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None, bs_ids=None):
+    def get_text_feats(self, text_ids, img_feats, self_mask, cross_mask, sg_embeds=None, sg_masks=None, past_data=None):
         word_embed = self.word_embedding(text_ids)
-        word_embed = self.decoder(word_embed, img_feats, self_mask, cross_mask, sg_embeds, sg_masks, bs_ids)
+        word_embed = self.decoder(word_embed, img_feats, self_mask, cross_mask, sg_embeds, sg_masks, past_data)
         return word_embed
 
     def extract_img_feats(self, images):
@@ -155,9 +156,19 @@ class RRGModel(nn.Module):
         else:
             patch_feats = self.encode_img_feats(patch_feats, att_masks)
 
+        past_data = {}
+        if self.sgade:
+            if self.hierarchical_attention:
+                sg_embeds_pool, sg_embeds_pool_masks = self._to_bs_format_pool(boxes[:, 0], sg_embeds, sg_masks,
+                                                                               patch_feats.size(0))
+                selected_bs = (sg_embeds_pool_masks.squeeze(1) == 0).sum(-1) != 0
+                past_data.update({'sg_embeds_pool':sg_embeds_pool,'sg_embeds_pool_masks':sg_embeds_pool_masks})
+            else:
+                selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
+            past_data.update({'selected_bs': selected_bs,'bs_ids': boxes[:,0]})
+
         text_embed, align_attns = self.get_text_feats(seq, patch_feats, self_mask=seq_masks, cross_mask=att_masks,
-                                                      sg_embeds=sg_embeds, sg_masks=sg_masks,
-                                                      bs_ids=boxes[:, 0] if self.use_sg else None)
+                                                      sg_embeds=sg_embeds, sg_masks=sg_masks,past_data=past_data)
         # output, align_attns = self.encoder_decoder(encoded_img_feats, seq, att_masks, seq_mask)
         output = self.rrg_head(text_embed)
 
@@ -261,7 +272,7 @@ class RRGModel(nn.Module):
 
         return out, [ys.unsqueeze(0)]
 
-    def infer(self, text_ids, patch_feats, self_masks, cross_masks=None, sg_embeds=None, sg_masks=None, bs_ids=None):
+    def infer(self, text_ids, patch_feats, self_masks, cross_masks=None, sg_embeds=None, sg_masks=None, past_data=None):
 
         self_masks = self_masks[:, None, :].expand(patch_feats.size(0), text_ids.size(-1), text_ids.size(-1))
         self_masks = 1.0 - self_masks
@@ -270,9 +281,31 @@ class RRGModel(nn.Module):
             patch_feats.device)  # use add attention instead of filling
         self_masks = self_masks + sub_mask
 
-        out, attns = self.get_text_feats(text_ids, patch_feats, self_masks, cross_masks, sg_embeds, sg_masks, bs_ids)
+        out, attns = self.get_text_feats(text_ids, patch_feats, self_masks, cross_masks, sg_embeds, sg_masks, past_data)
 
         return out
+
+    def _to_bs_format_pool(self, bs_ids, node_embeds, node_masks, batch_size):
+
+        bs_len = [(bs_ids == i).sum() for i in range(batch_size)]
+        node_masks = node_masks == 0
+
+        node_embeds = [torch.max(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)[0]
+                       # if self.pooling == 'max' else
+                       # torch.mean(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)
+                       for i in range(node_embeds.shape[0])
+                       ]
+        node_embeds = torch.cat(node_embeds, dim=0)
+
+        max_len = max(bs_len)
+        reformed_node_embeds = torch.zeros(batch_size, max_len, node_embeds.shape[-1], device=node_embeds.device)
+        reformed_node_masks = torch.full((batch_size, max_len), torch.finfo(node_embeds.dtype).min,
+                                         device=node_embeds.device)
+        for i in range(batch_size):
+            reformed_node_embeds[i, :bs_len[i]] = node_embeds[bs_ids == i]
+            reformed_node_masks[i, :bs_len[i]] = 0.0
+
+        return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
 
     def _prepare_feature(self, att_feats, att_masks):
 
