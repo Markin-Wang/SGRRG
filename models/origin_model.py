@@ -157,16 +157,16 @@ class RRGModel(nn.Module):
             patch_feats = self.encode_img_feats(patch_feats, att_masks)
 
         past_data = {}
-        if self.sgade:
-            if self.hierarchical_attention:
-                sg_embeds_pool, sg_embeds_pool_masks = self._to_bs_format_pool(boxes[:, 0], sg_embeds, sg_masks,
-                                                                               patch_feats.size(0))
-
-                selected_bs = (sg_embeds_pool_masks.squeeze(1) == 0).sum(-1) != 0
-                past_data.update({'sg_embeds_pool':sg_embeds_pool,'sg_embeds_pool_masks':sg_embeds_pool_masks})
-            else:
-                selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
-            past_data.update({'selected_bs': selected_bs,'bs_ids': boxes[:,0]})
+        # if self.sgade:
+        #     if self.hierarchical_attention:
+        #         sg_embeds_pool, sg_embeds_pool_masks = self._to_bs_format_pool(boxes[:, 0], sg_embeds, sg_masks,
+        #                                                                        patch_feats.size(0))
+        #
+        #         selected_bs = (sg_embeds_pool_masks.squeeze(1) == 0).sum(-1) != 0
+        #         past_data.update({'sg_embeds_pool':sg_embeds_pool,'sg_embeds_pool_masks':sg_embeds_pool_masks})
+        #     else:
+        #         selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
+        #     past_data.update({'selected_bs': selected_bs,'bs_ids': boxes[:,0]})
 
         text_embed, align_attns = self.get_text_feats(seq, patch_feats, self_mask=seq_masks, cross_mask=att_masks,
                                                       sg_embeds=sg_embeds, sg_masks=sg_masks,past_data=past_data)

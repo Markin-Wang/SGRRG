@@ -130,7 +130,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
 
     def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, past_data):
 
-        # bs_ids, selected_bs = past_data['bs_ids'], past_data['selected_bs']
+        bs_ids, selected_bs = past_data['bs_ids'], past_data['selected_bs']
 
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
 
