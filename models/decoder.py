@@ -130,7 +130,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
 
     def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, past_data):
 
-        # bs_ids, selected_bs = past_data['bs_ids'], past_data['selected_bs']
+        bs_ids, selected_bs = past_data['bs_ids'], past_data['selected_bs']
 
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
 
@@ -190,7 +190,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
                 x_img[selected_bs] = x_
 
         else:
-            selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
+            # selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
             # cross_mask bs x 1 x len_sg
             if self.fuse_opt == 'att':
                 x_, sg_embeds_, sg_masks_ = x_img[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
