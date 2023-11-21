@@ -257,22 +257,6 @@ class RRGModel(nn.Module):
 
         return return_dicts
 
-    def core(self, it,
-             patch_feats,
-             mask,
-             state, ):
-
-        if len(state) == 0:
-            ys = it.unsqueeze(1)
-        else:
-            ys = torch.cat([state[0][0], it.unsqueeze(1)], dim=1)
-        seq_mask = subsequent_mask(ys.size(1), type=patch_feats.dtype).to(
-            patch_feats.device)
-        out, attns = self.get_text_feats(ys, patch_feats, seq_mask, mask)
-        out = self.rrg_head(out[:, -1])
-
-        return out, [ys.unsqueeze(0)]
-
     def infer(self, text_ids, patch_feats, self_masks, cross_masks=None, sg_embeds=None, sg_masks=None, past_data=None):
 
         self_masks = self_masks[:, None, :].expand(patch_feats.size(0), text_ids.size(-1), text_ids.size(-1))

@@ -130,12 +130,13 @@ class SceneGraphAidedDecoderLayer(nn.Module):
 
     def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, past_data):
 
-        bs_ids, selected_bs = past_data['bs_ids'], past_data['selected_bs']
+        # bs_ids, selected_bs = past_data['bs_ids'], past_data['selected_bs']
 
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
 
+        x_img = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
+
         if self.hierarchical_attention:
-            x_img = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
             sg_embeds_pool, sg_embeds_pool_masks = past_data['sg_embeds_pool'], past_data['sg_embeds_pool_masks']
             if self.fuse_opt == 'add':
                 x_ = x[bs_ids.long()]  # expand to make each sub-graph in a sample has the same image query
@@ -187,30 +188,27 @@ class SceneGraphAidedDecoderLayer(nn.Module):
                                                                         sg_embeds[selected_bs],
                                                                         sg_embeds_pool_masks[selected_bs]))
                 x_img[selected_bs] = x_
-                x = x_img
 
         else:
+            selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
             # cross_mask bs x 1 x len_sg
             if self.fuse_opt == 'att':
-                x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
-                x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
+                x_, sg_embeds_, sg_masks_ = x_img[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
                 x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
-                x[selected_bs] = x_
+                x_img[selected_bs] = x_
 
             elif self.fuse_opt == 'cat':
-                x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
-                x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
+                x_, sg_embeds_, sg_masks_ = x_img[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
                 x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
-                x[selected_bs] = self.fuse_proj(torch.cat([x[selected_bs], x_], dim=-1)).to(dtype=x.dtype)
+                x_img[selected_bs] = self.fuse_proj(torch.cat([x[selected_bs], x_], dim=-1)).to(dtype=x.dtype)
 
             elif self.fuse_opt == 'add':
                 x_img = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
                 x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
                 x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
                 x_img[selected_bs] = x_img[selected_bs] + x_
-                x = x_img
 
-        return self.sublayer[3](x, self.feed_forward), self.cross_attn_img.attn
+        return self.sublayer[3](x_img, self.feed_forward), self.cross_attn_img.attn
 
 
 class MultiHeadedAttention(nn.Module):
