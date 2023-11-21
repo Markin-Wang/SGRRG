@@ -161,6 +161,7 @@ class RRGModel(nn.Module):
             if self.hierarchical_attention:
                 sg_embeds_pool, sg_embeds_pool_masks = self._to_bs_format_pool(boxes[:, 0], sg_embeds, sg_masks,
                                                                                patch_feats.size(0))
+
                 selected_bs = (sg_embeds_pool_masks.squeeze(1) == 0).sum(-1) != 0
                 past_data.update({'sg_embeds_pool':sg_embeds_pool,'sg_embeds_pool_masks':sg_embeds_pool_masks})
             else:

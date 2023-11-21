@@ -405,5 +405,5 @@ class BaseDatasetArrow(Dataset):
         return attribute_anns, region_anns
 
     def __len__(self):
-        ratio = 4 if self.split == 'train' else 10
+        ratio = 50 if self.split == 'train' else 10
         return len(self.all_texts) // ratio if self.debug else len(self.all_texts)
