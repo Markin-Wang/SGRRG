@@ -119,7 +119,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
         if self.hierarchical_attention:
             self.cross_attn_subgraph = MultiHeadedAttention(self.num_heads, self.d_model)
             # self.cross_attn_whole = MultiHeadedAttention(self.num_heads, self.d_model)
-            self.aggregate_attn = AggregateAttention(self.d_model, h=1)
+            self.aggregate_attn = AggregateAttention(self.d_model, h=self.num_heads)
             # self.query_proj = nn.Linear(self.d_model,self.d_model)
             # self.score_proj = nn.Linear(self.d_model, 1)
         else:
@@ -174,7 +174,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
                 sg_embeds = torch.zeros((x.shape[0] * max_node, x.shape[1], x_.shape[-1]), device=x_.device,
                                         dtype=x_.dtype)
                 sg_embeds[(pre_tsg_masks == 0).view(-1)] = x_
-                sg_embeds = sg_embeds.view(x.shape[0], max_node, x_.shape[1], x_.shape[-1])
+                sg_embeds = sg_embeds.view(x.shape[0], max_node, x.shape[1], x_.shape[-1])
             # only perform attention for those samples having the sg
 
             if self.fuse_opt == 'add':
@@ -208,7 +208,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
                 x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
                 x_img[selected_bs] = x_img[selected_bs] + x_
 
-        return self.sublayer[3](x_img, self.feed_forward), self.cross_attn_img.attn
+        return self.sublayer[-1](x_img, self.feed_forward), self.cross_attn_img.attn
 
 
 class MultiHeadedAttention(nn.Module):
