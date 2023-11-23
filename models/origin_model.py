@@ -73,6 +73,8 @@ class RRGModel(nn.Module):
         self.rrg_head = nn.Linear(self.hidden_size, config['vocab_size'])
         self.rrg_head.apply(init_weights)
 
+        self.disr_opt = config['disr_opt']
+
         if self.dis_cls:
             self.dis_head = DiseaseHead(config=config)
 
@@ -122,6 +124,7 @@ class RRGModel(nn.Module):
         images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs, sg_embeds, sg_masks = None, None, None, None, None, None
         dis_logits, disr_logits = None, None
+        box_abnormal_labels = None
         return_dicts = {}
 
         patch_feats = self.extract_img_feats(images)
@@ -134,7 +137,11 @@ class RRGModel(nn.Module):
             region_logits = self.region_selector(patch_feats, boxes, box_labels, box_masks)
 
         if self.att_cls:
-            box_feats, att_logits, disr_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks)
+            if self.disr_opt == 'con':
+                box_abnormal_labels = batch_dict['box_abnormal_labels']
+
+            box_feats, att_logits, disr_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks,
+                                                                          box_abnormal_labels)
             if self.use_box_feats:
                 patch_feats = box_feats
 
@@ -163,13 +170,13 @@ class RRGModel(nn.Module):
                                                                                patch_feats.size(0))
 
                 selected_bs = (sg_embeds_pool_masks.squeeze(1) == 0).sum(-1) != 0
-                past_data.update({'sg_embeds_pool':sg_embeds_pool,'sg_embeds_pool_masks':sg_embeds_pool_masks})
+                past_data.update({'sg_embeds_pool': sg_embeds_pool, 'sg_embeds_pool_masks': sg_embeds_pool_masks})
             else:
                 selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
-            past_data.update({'selected_bs': selected_bs,'bs_ids': boxes[:,0]})
+            past_data.update({'selected_bs': selected_bs, 'bs_ids': boxes[:, 0]})
 
         text_embed, align_attns = self.get_text_feats(seq, patch_feats, self_mask=seq_masks, cross_mask=att_masks,
-                                                      sg_embeds=sg_embeds, sg_masks=sg_masks,past_data=past_data)
+                                                      sg_embeds=sg_embeds, sg_masks=sg_masks, past_data=past_data)
         # output, align_attns = self.encoder_decoder(encoded_img_feats, seq, att_masks, seq_mask)
         output = self.rrg_head(text_embed)
 
@@ -186,6 +193,7 @@ class RRGModel(nn.Module):
         images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs = None, None, None, None
         dis_logits, dis_probs, disr_logits = None, None, None
+        box_abnormal_labels = None
         return_dicts = {}
         att_probs_record = defaultdict(dict)
 
@@ -210,6 +218,8 @@ class RRGModel(nn.Module):
             #         no_box_ids.append(batch_dict['img_id'][i])
 
         if self.att_cls:
+            # if self.disr_opt == 'con':
+            #     box_abnormal_labels = batch_dict['box_abnormal_labels']
             box_feats, att_logits, disr_logits = self.attribute_predictor(patch_feats, boxes, box_labels,
                                                                           box_masks=box_masks)
             att_probs = torch.sigmoid(att_logits)

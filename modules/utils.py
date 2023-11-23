@@ -9,6 +9,7 @@ import os
 from math import inf
 import torch.nn as nn
 from sklearn.metrics import roc_auc_score
+import torch.nn.functional as F
 
 
 def penalty_builder(penalty_config):
@@ -490,7 +491,7 @@ def con_loss(features, box_labels, box_abnormal_labels, alpha=0.4):
     features = F.normalize(features)
     cos_matrix = features.mm(features.t())
     pos_label_matrix = torch.stack(
-        [(box_labels == box_labels[i]) & (box_abnormal_labels == box_abnormal_labels[i]) for i in range(B)])
+        [(box_labels == box_labels[i]) & (box_abnormal_labels == box_abnormal_labels[i]) for i in range(B)]).float()
     neg_label_matrix = 1 - pos_label_matrix
     pos_cos_matrix = 1 - cos_matrix
     neg_cos_matrix = cos_matrix - alpha

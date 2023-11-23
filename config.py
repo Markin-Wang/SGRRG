@@ -96,7 +96,7 @@ def config():
     use_focal_ls_d = False
     dis_cls = False
     num_diseases = 14
-    dis_cls_w = 0.5
+    dis_cls_w = 0.25
 
     # region memory setting
     num_mem = 512
@@ -106,7 +106,7 @@ def config():
     # attribute classification setting
     preload_att = False
     disr_cls = False # region disease classification
-    disr_cls_w = 0.25
+    disr_w = 0.1
     disr_opt = 'cls' # classification or contrastive learning
 
     use_focal_ls_dr = False

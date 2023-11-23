@@ -77,7 +77,7 @@ class AttributePredictor(nn.Module):
     #     logits = self.attribuite_head(x)
     #     return x, logits
 
-    def forward(self, x, boxes, box_labels, box_masks=None, disease_labels=None):
+    def forward(self, x, boxes, box_labels, box_masks=None, box_abnormal_labels=None):
         if box_masks is not None:
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
         bs, num_tokens, feat_size = x.shape
@@ -89,9 +89,9 @@ class AttributePredictor(nn.Module):
 
         if self.disr_opt == 'cls':
             disr_logits = self.disr_head(x)
-        elif self.disr_opt == 'con':
+        elif self.disr_opt == 'con' and box_abnormal_labels is not None  :
             # apply contrastive loss
-            disr_logits = con_loss(x,box_labels, disease_labels)
+            disr_logits = con_loss(x,box_labels, box_abnormal_labels[box_masks])
         else:
             disr_logits = None
 

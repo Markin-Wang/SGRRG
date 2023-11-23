@@ -98,7 +98,8 @@ class BaseTrainer(object):
                                                                       reduction='mean')
                 else:
                     self.disr_cls_criterion = torch.nn.BCEWithLogitsLoss()
-                self.disr_cls_w = config['disr_cls_w']
+
+            self.disr_w = config['disr_w']
 
         if self.dis_cls:
             if self.use_focal_ls_d:
@@ -420,12 +421,17 @@ class Trainer(BaseTrainer):
                             disr_labels = batch_dict['box_abnormal_labels'][batch_dict['box_masks']].unsqueeze(
                                 -1)  # [bs ,1]
                             disr_loss = self.disr_cls_criterion(disr_logits, disr_labels)
-                            loss = loss + self.disr_cls_w * disr_loss
-                            disr_losses.update(attribute_cls_loss.item())
+                            loss = loss + self.disr_w * disr_loss
+                            disr_losses.update(disr_loss.item())
 
                         elif self.disr_opt == 'con':
                             # apply contrastive loss
-                            disr_logits = output['disr_logits']
+                            disr_loss = output['disr_logits']
+                            loss = loss + self.disr_w * disr_loss
+                            disr_losses.update(disr_loss.item())
+                        else:
+                            raise NotImplementedError
+
 
                 self.scaler.scale(loss).backward()
 
