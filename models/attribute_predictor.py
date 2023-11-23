@@ -1,9 +1,8 @@
 import torch.nn as nn
 from torchvision.ops.roi_pool import RoIPool
 from config import cgnome_id2cat as id2cat
-from modules.utils import init_weights
+from modules.utils import init_weights, con_loss
 import torch
-
 
 class AttributePredictor(nn.Module):
     def __init__(self, config):
@@ -21,11 +20,15 @@ class AttributePredictor(nn.Module):
         self.use_amp = config['use_amp']
         self.roi_pool = RoIPool(output_size=[self.output_size, self.output_size],
                                 spatial_scale= self.spatial_scale)
-        self.disr_cls = config['disr_cls']
         self.disr_opt = config['disr_opt']
         if self.disr_opt == 'cls':
             self.disr_head = nn.Linear(config['d_vf'], 1)
             self.disr_head.apply(init_weights)
+        elif self.disr_opt == 'con':
+            # apply contrastive loss
+            pass
+        else:
+            raise NotImplementedError
 
         # self.conv = nn.Conv2d(in_channels=self.feature_size, out_channels=self.feature_size,
         #                       kernel_size=self.output_size,
@@ -74,7 +77,7 @@ class AttributePredictor(nn.Module):
     #     logits = self.attribuite_head(x)
     #     return x, logits
 
-    def forward(self, x, boxes, box_labels, box_masks=None):
+    def forward(self, x, boxes, box_labels, box_masks=None, disease_labels=None):
         if box_masks is not None:
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
         bs, num_tokens, feat_size = x.shape
@@ -83,8 +86,12 @@ class AttributePredictor(nn.Module):
         x = self.roi_pool(x, boxes)  # box feasts, N x C x output_size x output_size
         x = torch.flatten(x, 1)
         x = self.ff(x)  # [bs, C, H(1), W(1)]
-        if self.disr_cls:
+
+        if self.disr_opt == 'cls':
             disr_logits = self.disr_head(x)
+        elif self.disr_opt == 'con':
+            # apply contrastive loss
+            disr_logits = con_loss(x,box_labels, disease_labels)
         else:
             disr_logits = None
 

@@ -7,7 +7,7 @@ import datetime
 import pandas as pd
 from numpy import inf
 from tqdm import tqdm
-from modules.utils import auto_resume_helper, get_grad_norm, reduce_tensor
+from modules.utils import auto_resume_helper, get_grad_norm, reduce_tensor, get_loss_and_list
 from modules.weighted_mesloss import Weighted_MSELoss
 from torch.cuda.amp import GradScaler, autocast
 from timm.utils import AverageMeter
@@ -70,7 +70,7 @@ class BaseTrainer(object):
         self.att_cls = config['att_cls']  # attribute classification
         self.region_cls = config['region_cls']
         self.dis_cls = config['dis_cls']
-        self.disr_cls = config['disr_cls']
+        self.disr_opt = config['disr_opt']
 
         self.use_focal_ls_r = config['use_focal_ls_r']
         self.use_focal_ls_a = config['use_focal_ls_a']
@@ -92,7 +92,7 @@ class BaseTrainer(object):
                 self.att_cls_criterion = torch.nn.BCEWithLogitsLoss()
             self.att_cls_w = config['att_cls_w']
 
-            if self.disr_cls:
+            if self.disr_opt == 'cls':
                 if self.use_focal_ls_dr:
                     self.disr_cls_criterion = AsymmetricLossOptimized(gamma_neg=2, gamma_pos=2, clip=0.0,
                                                                       reduction='mean')
@@ -364,7 +364,7 @@ class Trainer(BaseTrainer):
     def _train_epoch(self, epoch):
         ce_losses = AverageMeter()
         dis_cls_losses = AverageMeter()
-        disr_cls_losses = AverageMeter()
+        disr_losses = AverageMeter()
         region_cls_losses = AverageMeter()
         attribute_cls_losses = AverageMeter()
         norm_meter = AverageMeter()
@@ -374,6 +374,7 @@ class Trainer(BaseTrainer):
         self.optimizer.zero_grad()
         device = self.model.device
         img2attinfo = {}
+
         with tqdm(desc='Epoch %d - train' % epoch, disable=dist.get_rank() != self.local_rank,
                   unit='it', total=len(self.train_dataloader)) as pbar:
             for batch_idx, data in enumerate(self.train_dataloader):
@@ -384,6 +385,7 @@ class Trainer(BaseTrainer):
                 # )
                 # pbar.update()
                 # continue
+
                 batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if key in self.keys}
 
                 self.optimizer.zero_grad()
@@ -413,13 +415,17 @@ class Trainer(BaseTrainer):
                         loss = loss + self.att_cls_w * attribute_cls_loss
                         attribute_cls_losses.update(attribute_cls_loss.item())
 
-                        if self.disr_cls:
+                        if self.disr_opt == 'cls':
                             disr_logits = output['disr_logits']
-                            disr_labels = batch_dict['box_abnormal_labels'][batch_dict['box_masks']].unsqueeze(-1) # [bs ,1]
-                            disr_cls_loss = self.disr_cls_criterion(disr_logits, disr_labels)
-                            loss = loss + self.disr_cls_w * disr_cls_loss
-                            disr_cls_losses.update(attribute_cls_loss.item())
+                            disr_labels = batch_dict['box_abnormal_labels'][batch_dict['box_masks']].unsqueeze(
+                                -1)  # [bs ,1]
+                            disr_loss = self.disr_cls_criterion(disr_logits, disr_labels)
+                            loss = loss + self.disr_cls_w * disr_loss
+                            disr_losses.update(attribute_cls_loss.item())
 
+                        elif self.disr_opt == 'con':
+                            # apply contrastive loss
+                            disr_logits = output['disr_logits']
 
                 self.scaler.scale(loss).backward()
 
@@ -444,8 +450,8 @@ class Trainer(BaseTrainer):
                 # cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
                 pbar.set_postfix(ce=f'{ce_losses.val:.3f} ({ce_losses.avg:.3f})\t',
                                  dis_cls=f'{dis_cls_losses.val:.3f} ({dis_cls_losses.avg:.3f})\t',
-                                 disr_cls=f'{disr_cls_losses.val:.3f} ({disr_cls_losses.avg:.3f})\t' ,
-                                 rg_cls=f'{region_cls_losses.val:.3f} ({region_cls_losses.avg:.3f})\t' ,
+                                 disr_ls=f'{disr_losses.val:.3f} ({disr_losses.avg:.3f})\t',
+                                 rg_cls=f'{region_cls_losses.val:.3f} ({region_cls_losses.avg:.3f})\t',
                                  att_cls=f'{attribute_cls_losses.val:.3f} ({attribute_cls_losses.avg:.3f})\t',
                                  mem=f'mem {memory_used:.0f}MB',
                                  norm=f'{norm_meter.val:.3f} ({norm_meter.avg:.3f})')
@@ -469,6 +475,7 @@ class Trainer(BaseTrainer):
         val_ce_losses = AverageMeter()
         val_region_cls_losses = AverageMeter()
         val_dis_cls_losses = AverageMeter()
+        val_disr_losses = AverageMeter()
         log = {}
         self.model.eval()
         dataloader = self.val_dataloader if split == 'val' else self.test_dataloader
@@ -507,27 +514,24 @@ class Trainer(BaseTrainer):
                         if self.dis_cls:
                             dis_logits = output['dis_logits']
                             dis_probs = output['dis_probs']
-                            val_dis_cls_loss = self.dis_cls_criterion(dis_logits, batch_dict['disease_labels'])
+                            dis_preds, dis_targets, val_dis_cls_loss  = get_loss_and_list(dis_logits,
+                                                                 batch_dict['disease_labels'], dis_preds,
+                                                                 dis_targets, self.dis_cls_criterion,
+                                                                 cur_probs=dis_probs)
                             val_dis_cls_losses.update(val_dis_cls_loss.item())
-                            if len(dis_preds) > 0:
-                                dis_preds = torch.cat((dis_preds, dis_probs.cpu()), dim=0)
-                                dis_targets = torch.cat((dis_targets, batch_dict['disease_labels'].cpu()), dim=0)
-                            else:
-                                dis_preds = dis_probs.cpu()
-                                dis_targets = batch_dict['disease_labels'].cpu()
 
                         if self.region_cls:
                             region_logits = output['region_logits'][region_masks]
                             region_probs = output['region_probs'][region_masks]
+
                             if len(region_labels) > 0:
-                                val_region_cls_loss = self.region_cls_criterion(region_logits, region_labels)
+                                region_preds, region_targets, val_region_cls_loss  = get_loss_and_list(region_logits,
+                                                                     region_labels, region_preds,
+                                                                     region_targets, self.region_cls_criterion,
+                                                                     cur_probs=region_probs)
+
                                 val_region_cls_losses.update(val_region_cls_loss.item())
-                                if len(region_preds) > 0:
-                                    region_preds = torch.cat((region_preds, region_probs.cpu()), dim=0)
-                                    region_targets = torch.cat((region_targets, region_labels.cpu()), dim=0)
-                                else:
-                                    region_preds = region_probs.cpu()
-                                    region_targets = region_labels.cpu()
+
 
                         if self.att_cls and split == 'test':
                             att_probs_record = output['att_probs_record']
@@ -562,7 +566,6 @@ class Trainer(BaseTrainer):
                 # torch.save(img2attinfo, f'imgid2attinfo_{split}.pth')
                 # return log, val_res, val_gts, img_ids
 
-
                 if self.dis_cls:
                     dis_auc = calculate_auc(preds=dis_preds.numpy(), targets=dis_targets.long().numpy())
                     log.update({f'{split}_dis_auc': dis_auc, f"{split}_dis_ls": val_dis_cls_losses.avg})
@@ -591,7 +594,6 @@ class Trainer(BaseTrainer):
                             continue
                     att_auc = np.mean(att_aucs) if att_aucs else 0
                     log.update({f'{split}_att_auc': att_auc})
-
 
                 # ensure the data in each rank is the same to perform evaluation
                 if split == 'test':

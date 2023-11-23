@@ -1,5 +1,5 @@
 import torch
-#from config_swin import get_config
+# from config_swin import get_config
 import argparse
 import torch.distributed as dist
 import cv2
@@ -9,6 +9,7 @@ import os
 from math import inf
 import torch.nn as nn
 from sklearn.metrics import roc_auc_score
+
 
 def penalty_builder(penalty_config):
     if penalty_config == '':
@@ -62,6 +63,7 @@ def repeat_tensors(n, x):
     elif type(x) is list or type(x) is tuple:
         x = [repeat_tensors(n, _) for _ in x]
     return x
+
 
 def load_pretrained(config, model, logger):
     logger.info(f"==============> Loading weight {config.MODEL.PRETRAINED} for fine-tuning......")
@@ -157,12 +159,13 @@ def load_pretrained(config, model, logger):
     del checkpoint
     torch.cuda.empty_cache()
 
+
 def load_ape(config, model, logger):
     logger.info(f"==============> Loading ape weights {config.MODEL.PRETRAINED} for fine-tuning......")
     checkpoint = torch.load(config.MODEL.PRETRAINED, map_location='cpu')
     state_dict = checkpoint['model']
     absolute_pos_embed_keys = [k for k in state_dict.keys() if "absolute_pos_embed" in k]
-    print(1111111,absolute_pos_embed_keys)
+    print(1111111, absolute_pos_embed_keys)
     for k in absolute_pos_embed_keys:
         # dpe
         absolute_pos_embed_pretrained = state_dict[k]
@@ -183,6 +186,7 @@ def load_ape(config, model, logger):
                 absolute_pos_embed_pretrained_resized = absolute_pos_embed_pretrained_resized.flatten(1, 2)
                 state_dict[k] = absolute_pos_embed_pretrained_resized
     msg = model.load_state_dict(state_dict, strict=False)
+
 
 def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler, logger):
     save_state = {'model': model.state_dict(),
@@ -231,6 +235,7 @@ def reduce_tensor(tensor):
     dist.all_reduce(rt, op=dist.ReduceOp.SUM)
     rt /= dist.get_world_size()
     return rt
+
 
 # for classification
 
@@ -299,8 +304,8 @@ def transform(image, cfg):
 
     return image
 
-def Common(image):
 
+def Common(image):
     image = cv2.equalizeHist(image)
     image = cv2.GaussianBlur(image, (3, 3), 0)
 
@@ -335,6 +340,7 @@ def GetTransforms(image, target=None, type='common'):
         raise Exception(
             'Unknown transforms_type : '.format(type))
 
+
 def load_checkpoint(resume_file, model, optimizer, lr_scheduler, logger):
     logger.info(f"==============> Resuming form {resume_file}....................")
     checkpoint = torch.load(resume_file, map_location='cpu')
@@ -355,11 +361,13 @@ def load_checkpoint(resume_file, model, optimizer, lr_scheduler, logger):
     torch.cuda.empty_cache()
     return max_accuracy
 
+
 def reduce_tensor(tensor):
     rt = tensor.clone()
     dist.all_reduce(rt, op=dist.ReduceOp.SUM)
     rt /= dist.get_world_size()
     return rt
+
 
 def clip_grad_norm_(
         parameters, max_norm: float, norm_type: float = 2.0,
@@ -424,12 +432,13 @@ def load_embedding_layer(data_path, trainable=False):
         weights_matrix = pickle.load(bio_word2vec_weights)
 
     weights_matrix = torch.tensor(weights_matrix).float()
-    print(222222,weights_matrix.shape)
+    print(222222, weights_matrix.shape)
     embedding_layer = nn.Embedding.from_pretrained(weights_matrix)
     if trainable:
         embedding_layer.weight.requires_grad = True
 
     return embedding_layer
+
 
 def init_weights(module):
     if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -441,24 +450,27 @@ def init_weights(module):
     if isinstance(module, nn.Linear) and module.bias is not None:
         module.bias.data.zero_()
 
+
 def init_weights_origin(module):
     for p in module.parameters():
         if p.dim() > 1:
             nn.init.xavier_uniform_(p)
 
+
 def calculate_auc(preds, targets):
     # preds: numpy array with shape [N samples, num_classes]
     # target: the same shape as preds
-    if isinstance(preds,list):
+    if isinstance(preds, list):
         preds, targets = np.array(preds), np.array(targets)
     # filter all zero
     # mask = [i for i,target in enumerate(targets) if sum(target)!=0 ]
     # preds, targets = preds[mask,:], targets[mask,:]
     # imbalanced dataset, use macro
-    return roc_auc_score(y_true=targets,y_score=preds,average='macro')
+    return roc_auc_score(y_true=targets, y_score=preds, average='macro')
+
 
 def get_region_mask(region_labels):
-    region_sum = torch.sum(region_labels,dim=1)
+    region_sum = torch.sum(region_labels, dim=1)
     return region_sum != 0
 
 
@@ -471,3 +483,37 @@ def gather_preds_and_gts(predictions, references):
     dist.all_gather(gathered_references, references)
 
     return gathered_predictions, gathered_references
+
+
+def con_loss(features, box_labels, box_abnormal_labels, alpha=0.4):
+    B, _ = features.shape
+    features = F.normalize(features)
+    cos_matrix = features.mm(features.t())
+    pos_label_matrix = torch.stack(
+        [(box_labels == box_labels[i]) & (box_abnormal_labels == box_abnormal_labels[i]) for i in range(B)])
+    neg_label_matrix = 1 - pos_label_matrix
+    pos_cos_matrix = 1 - cos_matrix
+    neg_cos_matrix = cos_matrix - alpha
+    neg_cos_matrix[neg_cos_matrix < 0] = 0
+    loss = (pos_cos_matrix * pos_label_matrix).sum() + (neg_cos_matrix * neg_label_matrix).sum()
+    loss /= (B * B)
+    return loss
+
+
+def get_loss_and_list(cur_preds, cur_gts, preds, gts, criteria=None, cur_probs=None):
+    if criteria is not None:
+        loss = criteria(cur_preds, cur_gts)
+    else:
+        loss = None
+
+    if cur_probs is None:
+        cur_probs = torch.sigmoid(cur_preds)
+
+    if len(preds) > 0:
+        preds = torch.cat((preds, cur_probs.cpu()), dim=0)
+        gts = torch.cat((gts, cur_gts.cpu()), dim=0)
+    else:
+        preds = cur_probs.cpu()
+        gts = cur_gts.cpu()
+
+    return preds, gts, loss

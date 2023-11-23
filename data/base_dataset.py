@@ -248,6 +248,17 @@ class BaseDatasetArrow(Dataset):
         print(att_labels)
         exit()
 
+    def _get_box_abnormal_ratio(self):
+        abnormal_count = 0
+        total_count = 0
+        for i in tqdm(range(len(self.all_texts))):
+            box_abnormal_labels = self.get_image(i)['box_abnormal_labels']
+            total_count += len(box_abnormal_labels)
+            abnormal_count += box_abnormal_labels.sum()
+
+        print(f'the abnormal ratio is: {abnormal_count*100/total_count:.3f}%.')
+        exit()
+
     def load_box_annotations(self, ann_file):
         """Load annotation from COCO style annotation file.
         Args:
@@ -405,5 +416,5 @@ class BaseDatasetArrow(Dataset):
         return attribute_anns, region_anns
 
     def __len__(self):
-        ratio = 50 if self.split == 'train' else 10
+        ratio = 50 if self.split == 'train' else 20
         return len(self.all_texts) // ratio if self.debug else len(self.all_texts)
