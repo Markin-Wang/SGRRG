@@ -429,6 +429,8 @@ class Trainer(BaseTrainer):
                             disr_loss = output['disr_logits']
                             loss = loss + self.disr_w * disr_loss
                             disr_losses.update(disr_loss.item())
+                        elif self.disr_opt is None:
+                            pass
                         else:
                             raise NotImplementedError
 
