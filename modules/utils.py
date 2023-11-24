@@ -508,10 +508,10 @@ def con_loss(features, box_labels, box_abnormal_labels, alpha=0.3):
         pos_label_matrix.append(same_labels & (box_abnormal_labels == box_abnormal_labels[i]))
         neg_label_matrix.append(same_labels & (box_abnormal_labels != box_abnormal_labels[i]))
         loss_scale += same_labels.sum()
-    #
-    # pos_label_matrix = torch.stack(pos_label_matrix).float()
-    #
-    # neg_label_matrix = torch.stack(neg_label_matrix).float()
+    
+    pos_label_matrix = torch.stack(pos_label_matrix).float()
+
+    neg_label_matrix = torch.stack(neg_label_matrix).float()
 
     # pos_label_matrix = torch.stack(
     #     [(box_labels == box_labels[i]) & (box_abnormal_labels == box_abnormal_labels[i]) for i in range(B)]).float()
