@@ -491,23 +491,23 @@ def con_loss(features, box_labels, box_abnormal_labels, alpha=0.3):
     features = F.normalize(features)
     cos_matrix = features.mm(features.t())
 
-    box_labels = box_labels.unsqueeze(-1).repeat(1,box_labels.shape[0])
-    box_abnormal_labels = box_abnormal_labels.unsqueeze(-1).repeat(1,box_abnormal_labels.shape[0])
+    # box_labels = box_labels.unsqueeze(-1).repeat(1,box_labels.shape[0])
+    # box_abnormal_labels = box_abnormal_labels.unsqueeze(-1).repeat(1,box_abnormal_labels.shape[0])
+    #
+    # same_labels = box_labels == box_labels[0].unsqueeze(-1)
+    #
+    # pos_label_matrix = same_labels & (box_abnormal_labels == box_abnormal_labels[0].unsqueeze(-1))
+    # neg_label_matrix = same_labels & (box_abnormal_labels != box_abnormal_labels[0].unsqueeze(-1))
+    #
+    # loss_scale = same_labels.sum()
 
-    same_labels = box_labels == box_labels[0].unsqueeze(-1)
-
-    pos_label_matrix = same_labels & (box_abnormal_labels == box_abnormal_labels[0].unsqueeze(-1))
-    neg_label_matrix = same_labels & (box_abnormal_labels != box_abnormal_labels[0].unsqueeze(-1))
-
-    loss_scale = same_labels.sum()
-
-    # loss_scale = 0
-    # pos_label_matrix, neg_label_matrix = [], []
-    # for i in range(B):
-    #     same_labels = box_labels == box_labels[i]
-    #     pos_label_matrix.append(same_labels & (box_abnormal_labels == box_abnormal_labels[i]))
-    #     neg_label_matrix.append(same_labels & (box_abnormal_labels != box_abnormal_labels[i]))
-    #     loss_scale += same_labels.sum()
+    loss_scale = 0
+    pos_label_matrix, neg_label_matrix = [], []
+    for i in range(B):
+        same_labels = box_labels == box_labels[i]
+        pos_label_matrix.append(same_labels & (box_abnormal_labels == box_abnormal_labels[i]))
+        neg_label_matrix.append(same_labels & (box_abnormal_labels != box_abnormal_labels[i]))
+        loss_scale += same_labels.sum()
     #
     # pos_label_matrix = torch.stack(pos_label_matrix).float()
     #
