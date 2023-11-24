@@ -136,7 +136,7 @@ class RRGModel(nn.Module):
             boxes, box_labels, box_masks = batch_dict['boxes'], batch_dict['box_labels'], batch_dict['box_masks']
             region_logits = self.region_selector(patch_feats, boxes, box_labels, box_masks)
 
-            if self.disr_opt.startswith('con'):
+            if self.disr_opt and self.disr_opt.startswith('con'):
                 box_abnormal_labels = batch_dict['box_abnormal_labels'][box_masks]
 
 

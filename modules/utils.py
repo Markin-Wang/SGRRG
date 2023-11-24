@@ -548,3 +548,63 @@ def get_loss_and_list(cur_preds, cur_gts, preds, gts, criteria=None, cur_probs=N
         gts = cur_gts.cpu()
 
     return preds, gts, loss
+
+def create_distance_correlation_tf(X1,X2):
+
+    def _create_centered_distance(X):
+        '''
+            Used to calculate the distance matrix of N samples.
+            (However how could tf store a HUGE matrix with the shape like 70000*70000*4 Bytes????)
+        '''
+        # calculate the pairwise distance of X
+        # .... A with the size of [batch_size, embed_size/n_factors]
+        # .... D with the size of [batch_size, batch_size]
+        # X = tf.math.l2_normalize(XX, axis=1)
+        r = tf.reduce_sum(tf.square(X), 1, keepdims=True)
+        D = tf.sqrt(tf.maximum(r - 2 * tf.matmul(a=X, b=X, transpose_b=True) + tf.transpose(r), 0.0) + 1e-8)
+
+        # # calculate the centered distance of X
+        # # .... D with the size of [batch_size, batch_size]
+        D = D - tf.reduce_mean(D, axis=0, keepdims=True) - tf.reduce_mean(D, axis=1, keepdims=True) \
+            + tf.reduce_mean(D)
+        return D
+
+    def _create_distance_covariance(D1, D2):
+        # calculate distance covariance between D1 and D2
+        n_samples = tf.cast(tf.shape(D1)[0], tf.float32)
+        dcov = tf.sqrt(tf.maximum(tf.reduce_sum(D1 * D2) / (n_samples * n_samples), 0.0) + 1e-8)
+        # dcov = tf.sqrt(tf.maximum(tf.reduce_sum(D1 * D2)) / n_samples
+        return dcov
+
+    D1 = _create_centered_distance(X1)
+    D2 = _create_centered_distance(X2)
+
+    dcov_12 = _create_distance_covariance(D1, D2)
+    dcov_11 = _create_distance_covariance(D1, D1)
+    dcov_22 = _create_distance_covariance(D2, D2)
+
+    # calculate the distance correlation
+    dcor = dcov_12 / (tf.sqrt(tf.maximum(dcov_11 * dcov_22, 0.0)) + 1e-10)
+    # return tf.reduce_sum(D1) + tf.reduce_sum(D2)
+    return dcor
+
+
+def create_distance_correlation(tensor):
+    # Step 1: Compute pairwise distance matrices
+    distance_matrix = torch.cdist(tensor, tensor)
+
+    # Step 2: Set the diagonal elements to a large value (e.g., infinity) to remove self-correlation
+    torch.fill_diagonal_(distance_matrix, float('inf'))
+
+    # Step 3: Set upper triangular elements to a large value (e.g., infinity) to remove duplicate calculations
+    distance_matrix = distance_matrix.triu(diagonal=1) + float('inf')
+
+    # Step 4: Compute distance covariance and variances
+    distance_covariance = torch.sum((distance_matrix - distance_matrix.mean()) ** 2)
+    distance_variance1 = torch.sum((distance_matrix - distance_matrix.mean(dim=0)) ** 2)
+    distance_variance2 = torch.sum((distance_matrix - distance_matrix.mean(dim=1)) ** 2)
+
+    # Step 5: Compute distance correlation
+    distance_correlation = distance_covariance / (torch.sqrt(distance_variance1) * torch.sqrt(distance_variance2))
+
+    print("Distinct Pairwise Distance Correlation:", distance_correlation.item())
