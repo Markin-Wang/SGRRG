@@ -123,7 +123,7 @@ class RRGModel(nn.Module):
     def forward_train(self, batch_dict):
         images, targets = batch_dict['image'], batch_dict['text']
         region_logits, region_probs, att_logits, att_probs, sg_embeds, sg_masks = None, None, None, None, None, None
-        dis_logits, disr_logits = None, None
+        dis_logits, disr_logits, disr_ls_sg = None, None, None
         box_abnormal_labels = None
         return_dicts = {}
 
@@ -136,10 +136,11 @@ class RRGModel(nn.Module):
             boxes, box_labels, box_masks = batch_dict['boxes'], batch_dict['box_labels'], batch_dict['box_masks']
             region_logits = self.region_selector(patch_feats, boxes, box_labels, box_masks)
 
-        if self.att_cls:
-            if self.disr_opt == 'con':
-                box_abnormal_labels = batch_dict['box_abnormal_labels']
+            if self.disr_opt.startswith('con'):
+                box_abnormal_labels = batch_dict['box_abnormal_labels'][box_masks]
 
+
+        if self.att_cls:
             box_feats, att_logits, disr_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks,
                                                                           box_abnormal_labels)
             if self.use_box_feats:
@@ -148,9 +149,10 @@ class RRGModel(nn.Module):
         if self.use_sg:
             attribute_ids = batch_dict['attribute_ids']
             boxes, box_labels = boxes[box_masks], box_labels[box_masks]
-            sg_embeds, sg_masks, obj_embeds, obj_masks = self.scene_graph_encoder(boxes, box_feats, box_labels,
+            sg_embeds, sg_masks, obj_embeds, obj_masks_, disr_ls_sg = self.scene_graph_encoder(boxes, box_feats, box_labels,
                                                                                   batch_size=patch_feats.size(0),
-                                                                                  att_ids=attribute_ids)
+                                                                                  att_ids=attribute_ids,
+                                                                                  box_abnormal_labels=box_abnormal_labels)
 
         # obtain seq mask, should generated in dataloader
         patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
@@ -184,7 +186,7 @@ class RRGModel(nn.Module):
                              'region_logits': region_logits,
                              'att_logits': att_logits,
                              'dis_logits': dis_logits,
-                             'disr_logits': disr_logits,
+                             'disr_logits': disr_ls_sg if self.disr_opt and 'sg' in self.disr_opt else disr_logits,
                              })
 
         return return_dicts
@@ -237,7 +239,7 @@ class RRGModel(nn.Module):
             # attribute_ids = batch_dict['attribute_ids']
             # sg_embeds, sg_masks = self.scene_graph_encoder(boxes, box_feats, box_labels, batch_size=patch_feats.size(0),
             #                                                att_ids=attribute_ids)
-            sg_embeds, sg_masks, obj_embeds, obj_masks = self.scene_graph_encoder(boxes, box_feats, box_labels,
+            sg_embeds, sg_masks, obj_embeds, obj_masks, disr_ls_sg = self.scene_graph_encoder(boxes, box_feats, box_labels,
                                                                                   batch_size=patch_feats.size(0),
                                                                                   att_probs=att_probs)
 
@@ -258,7 +260,7 @@ class RRGModel(nn.Module):
                              'att_probs_record': att_probs_record,
                              'dis_logits': dis_logits,
                              'dis_probs': dis_probs,
-                             'disr_logits': disr_logits,
+                             'disr_logits':disr_logits,
                              # 'no_box_ids': no_box_ids,
                              'sg_embeds': sg_embeds if self.sgade else None,
                              'sg_masks': sg_masks if self.sgade else None,

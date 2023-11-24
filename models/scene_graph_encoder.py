@@ -1,7 +1,7 @@
 import torch.nn as nn
 import copy
 from modules.standard_trans import PositionwiseFeedForward, SublayerConnection
-from modules.utils import init_weights
+from modules.utils import init_weights, con_loss
 from config import cgnome_catid2attrange as catid2attrange, cgnome_id2cat as id2cat, cgnome_cumcat
 import numpy as np
 import torch
@@ -68,7 +68,7 @@ class SceneGraphEncoder(nn.Module):
         self.sg_encoder = SGEncoder(config)
         self.sg_encoder.apply(init_weights)
 
-        # self.disr_cls = config['disr_cls']
+        self.disr_opt = config['disr_opt']
         # self.disr_opt = config['disr_opt']
         # if self.disr_opt == 'cls':
         #     self.disr_head = nn.Linear(self.hidden_size, 1)
@@ -86,7 +86,7 @@ class SceneGraphEncoder(nn.Module):
             "attribute_masks", attribute_masks, persistent=False
         )
 
-    def forward(self, boxes, box_feats, box_labels, batch_size, att_ids=None, att_probs=None):
+    def forward(self, boxes, box_feats, box_labels, batch_size, att_ids=None, att_probs=None, box_abnormal_labels=None):
         # for one head
         # if att_ids is None:
         #     # for inference, generate the att_ids from the att_probs
@@ -147,6 +147,14 @@ class SceneGraphEncoder(nn.Module):
         else:
             raise NotImplementedError
 
+        if self.disr_opt == 'con_sg' and box_abnormal_labels is not None:
+            index = node_masks == 0
+            x = torch.cat([torch.max(sg_embeds[i,index[i, 0]],dim=0, keepdim=True)[0] for i in range(len(sg_embeds))], dim=0)
+            disr_ls_sg = con_loss(x,box_labels,box_abnormal_labels)
+        else:
+            disr_ls_sg = None
+
+
         if self.pooling is not None:
             # sg_embeds, _ = torch.max(sg_embeds, dim=1)
             sg_embeds, sg_masks = self._to_bs_format_pool(boxes[:, 0], sg_embeds, node_masks, batch_size)
@@ -162,7 +170,7 @@ class SceneGraphEncoder(nn.Module):
         #     disr_logits = self.disr_head(sg_embeds)  # the first column is the region embeds with the same order
         # else:
 
-        return sg_embeds, sg_masks, obj_embeds, obj_masks
+        return sg_embeds, sg_masks, obj_embeds, obj_masks, disr_ls_sg
 
     def _prepare_att(self, att_labels):
         max_len = max(torch.sum(att_labels, dim=1))

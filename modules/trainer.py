@@ -424,7 +424,7 @@ class Trainer(BaseTrainer):
                             loss = loss + self.disr_w * disr_loss
                             disr_losses.update(disr_loss.item())
 
-                        elif self.disr_opt == 'con':
+                        elif self.disr_opt .startswith('con'):
                             # apply contrastive loss
                             disr_loss = output['disr_logits']
                             loss = loss + self.disr_w * disr_loss

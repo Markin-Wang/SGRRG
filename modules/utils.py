@@ -486,18 +486,38 @@ def gather_preds_and_gts(predictions, references):
     return gathered_predictions, gathered_references
 
 
-def con_loss(features, box_labels, box_abnormal_labels, alpha=0.4):
+def con_loss(features, box_labels, box_abnormal_labels, alpha=0.3):
     B, _ = features.shape
     features = F.normalize(features)
     cos_matrix = features.mm(features.t())
-    pos_label_matrix = torch.stack(
-        [(box_labels == box_labels[i]) & (box_abnormal_labels == box_abnormal_labels[i]) for i in range(B)]).float()
-    neg_label_matrix = 1 - pos_label_matrix
+
+    loss_scale = 0
+    pos_label_matrix, neg_label_matrix = [], []
+    for i in range(B):
+        same_labels = box_labels == box_labels[i]
+        pos_label_matrix.append(same_labels & (box_abnormal_labels == box_abnormal_labels[i]))
+        neg_label_matrix.append(same_labels & (box_abnormal_labels != box_abnormal_labels[i]))
+        loss_scale += same_labels.sum()
+
+    pos_label_matrix = torch.stack(pos_label_matrix).float()
+
+    neg_label_matrix = torch.stack(neg_label_matrix).float()
+
+    # pos_label_matrix = torch.stack(
+    #     [(box_labels == box_labels[i]) & (box_abnormal_labels == box_abnormal_labels[i]) for i in range(B)]).float()
+    #
+    # neg_label_matrix = torch.stack(
+    #     [(box_labels == box_labels[i]) & (box_abnormal_labels != box_abnormal_labels[i]) for i in range(B)]).float()
+
+    # neg_label_matrix = 1 - pos_label_matrix
     pos_cos_matrix = 1 - cos_matrix
+    # pos_cos_matrix[pos_cos_matrix<0] = 0
     neg_cos_matrix = cos_matrix - alpha
     neg_cos_matrix[neg_cos_matrix < 0] = 0
     loss = (pos_cos_matrix * pos_label_matrix).sum() + (neg_cos_matrix * neg_label_matrix).sum()
-    loss /= (B * B)
+    # loss = (pos_cos_matrix * pos_label_matrix).sum()
+    # loss /= (B * B)
+    loss /= loss_scale
     return loss
 
 

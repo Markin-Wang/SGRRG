@@ -24,11 +24,11 @@ class AttributePredictor(nn.Module):
         if self.disr_opt == 'cls':
             self.disr_head = nn.Linear(config['d_vf'], 1)
             self.disr_head.apply(init_weights)
-        elif self.disr_opt == 'con':
-            # apply contrastive loss
-            pass
-        else:
-            raise NotImplementedError
+        # elif self.disr_opt == 'conatt':
+        #     # apply contrastive loss
+        #     pass
+        # else:
+        #     raise NotImplementedError
 
         # self.conv = nn.Conv2d(in_channels=self.feature_size, out_channels=self.feature_size,
         #                       kernel_size=self.output_size,
@@ -89,9 +89,9 @@ class AttributePredictor(nn.Module):
 
         if self.disr_opt == 'cls':
             disr_logits = self.disr_head(x)
-        elif self.disr_opt == 'con' and box_abnormal_labels is not None  :
+        elif self.disr_opt == 'con_att' and box_abnormal_labels is not None  :
             # apply contrastive loss
-            disr_logits = con_loss(x,box_labels, box_abnormal_labels[box_masks])
+            disr_logits = con_loss(x,box_labels, box_abnormal_labels)
         else:
             disr_logits = None
 
