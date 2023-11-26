@@ -38,6 +38,7 @@ class SceneGraphEncoder(nn.Module):
         self.num_diseases = config['num_diseases']
         self.pooling = config['pooling']
         self.hierarchical_attention = config['hierarchical_attention']
+        self.alpha = config['alpha']
 
         assert not (
                 self.pooling is not None and self.hierarchical_attention), 'pooling and hierarchical attention cannot be both enabled '
@@ -150,7 +151,7 @@ class SceneGraphEncoder(nn.Module):
         if self.disr_opt == 'con_sg' and box_abnormal_labels is not None:
             index = node_masks == 0
             x = torch.cat([torch.max(sg_embeds[i,index[i, 0]],dim=0, keepdim=True)[0] for i in range(len(sg_embeds))], dim=0)
-            disr_ls_sg = con_loss(x,box_labels,box_abnormal_labels)
+            disr_ls_sg = con_loss(x,box_labels,box_abnormal_labels, alpha=self.alpha)
         else:
             disr_ls_sg = None
 
