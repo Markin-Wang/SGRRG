@@ -486,7 +486,7 @@ def gather_preds_and_gts(predictions, references):
     return gathered_predictions, gathered_references
 
 
-def con_loss(features, box_labels, box_abnormal_labels, alpha=0.4):
+def con_loss(features, box_labels, box_abnormal_labels, pos_margin=0.0, neg_margin=0.3):
     B, _ = features.shape
     features = F.normalize(features)
     cos_matrix = features.mm(features.t())
@@ -525,9 +525,9 @@ def con_loss(features, box_labels, box_abnormal_labels, alpha=0.4):
     #     [(box_labels == box_labels[i]) & (box_abnormal_labels != box_abnormal_labels[i]) for i in range(B)]).float()
 
     # neg_label_matrix = 1 - pos_label_matrix
-    pos_cos_matrix = 1 - cos_matrix
-    # pos_cos_matrix[pos_cos_matrix<0] = 0
-    neg_cos_matrix = cos_matrix - alpha
+    pos_cos_matrix = 1 - pos_margin - cos_matrix
+    pos_cos_matrix[pos_cos_matrix<0] = 0
+    neg_cos_matrix = cos_matrix - neg_margin
     neg_cos_matrix[neg_cos_matrix < 0] = 0
     loss = (pos_cos_matrix * pos_label_matrix).sum() + (neg_cos_matrix * neg_label_matrix).sum()
     # loss = (pos_cos_matrix * pos_label_matrix).sum()

@@ -134,7 +134,8 @@ def config():
     encode_type = 'oa-c'
     pooling = None
     hierarchical_attention = False
-    alpha = 0.4 # margin
+    neg_margin = 0.3 # neg_margin
+    pos_margin = 0.0 # pos margin
     # object-attribute coupled (oa-c): node-att to node-att
     # object-attribute decomposed (oa-d): node to node-att then nodes to nodes
     # object-attribute decomposed completely (oa-dc): node to att then nodes to nodes
