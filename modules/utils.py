@@ -491,27 +491,32 @@ def con_loss(features, box_labels, box_abnormal_labels, alpha=0.3):
     features = F.normalize(features)
     cos_matrix = features.mm(features.t())
 
-    # box_labels = box_labels.unsqueeze(-1).repeat(1,box_labels.shape[0])
-    # box_abnormal_labels = box_abnormal_labels.unsqueeze(-1).repeat(1,box_abnormal_labels.shape[0])
-    #
-    # same_labels = box_labels == box_labels[0].unsqueeze(-1)
-    #
-    # pos_label_matrix = same_labels & (box_abnormal_labels == box_abnormal_labels[0].unsqueeze(-1))
-    # neg_label_matrix = same_labels & (box_abnormal_labels != box_abnormal_labels[0].unsqueeze(-1))
-    #
-    # loss_scale = same_labels.sum()
+    box_labels = box_labels.unsqueeze(0).repeat(box_labels.shape[0], 1)
+    box_abnormal_labels = box_abnormal_labels.unsqueeze(0).repeat(box_abnormal_labels.shape[0], 1)
 
-    loss_scale = 0
-    pos_label_matrix, neg_label_matrix = [], []
-    for i in range(B):
-        same_labels = box_labels == box_labels[i]
-        pos_label_matrix.append(same_labels & (box_abnormal_labels == box_abnormal_labels[i]))
-        neg_label_matrix.append(same_labels & (box_abnormal_labels != box_abnormal_labels[i]))
-        loss_scale += same_labels.sum()
-    
-    pos_label_matrix = torch.stack(pos_label_matrix).float()
+    same_labels = box_labels == box_labels[0].unsqueeze(-1)
 
-    neg_label_matrix = torch.stack(neg_label_matrix).float()
+
+    pos_label_matrix = same_labels & (box_abnormal_labels == box_abnormal_labels[0].unsqueeze(-1))
+    neg_label_matrix = same_labels & (box_abnormal_labels != box_abnormal_labels[0].unsqueeze(-1))
+
+    loss_scale = same_labels.sum()
+
+    # loss_scale = 0
+    # pos_label_matrix, neg_label_matrix = [], []
+    # for i in range(B):
+    #     same_labels = box_labels == box_labels[i]
+    #     pos_label_matrix.append(same_labels & (box_abnormal_labels == box_abnormal_labels[i]))
+    #     neg_label_matrix.append(same_labels & (box_abnormal_labels != box_abnormal_labels[i]))
+    #     loss_scale += same_labels.sum()
+    #
+    # pos_label_matrix = torch.stack(pos_label_matrix).float()
+    #
+    # neg_label_matrix = torch.stack(neg_label_matrix).float()
+    #
+    # print((pos_label_matrix_==pos_label_matrix).all())
+    # print((neg_label_matrix_ == neg_label_matrix).all())
+    # print((loss_scale_==loss_scale))
 
     # pos_label_matrix = torch.stack(
     #     [(box_labels == box_labels[i]) & (box_abnormal_labels == box_abnormal_labels[i]) for i in range(B)]).float()
@@ -591,7 +596,7 @@ def create_distance_correlation_tf(X1,X2):
 
 def create_distance_correlation(tensor):
     # Step 1: Compute pairwise distance matrices
-    distance_matrix = torch.cdist(tensor, tensor)
+    tensor_centroid = tensor - torch.mean(tensor, dim=1)
 
     # Step 2: Set the diagonal elements to a large value (e.g., infinity) to remove self-correlation
     torch.fill_diagonal_(distance_matrix, float('inf'))
