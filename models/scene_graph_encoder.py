@@ -42,6 +42,8 @@ class SceneGraphEncoder(nn.Module):
         self.pos_margin = config['pos_margin']
         self.neg_margin = config['neg_margin']
         self.orthogonal_ls = config['orthogonal_ls']
+        self.random_mask = config['random_mask']
+        self.mask_ratio = config['mask_ratio']
         if self.orthogonal_ls:
             self.orthogonal_ls_criteria = OrthogonalLoss()
 
@@ -175,6 +177,11 @@ class SceneGraphEncoder(nn.Module):
             orthogonal_ls = self.orthogonal_ls_criteria(self.token_type_embeddings(obj_type))
         else:
             orthogonal_ls = None
+
+        if self.random_mask and self.training:
+            num_samples = sg_embeds.shape[0]
+            mask_index = torch.rand(num_samples) <= self.mask_ratio
+            sg_masks[mask_index,:] = torch.finfo(sg_masks.dtype).min
 
         # if self.disr_cls and self.disr_opt=='cls':
         #     # disr_logits = self.disr_head(sg_embeds[:,0]) # the first column is the region embeds with the same order

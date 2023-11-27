@@ -172,6 +172,9 @@ def config():
 
     print_freq = 30
 
+    random_mask = False
+    mask_ratio = 0.01
+
 
 @ex.named_config
 def task_train_caption_iu():
