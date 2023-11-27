@@ -76,6 +76,8 @@ class BaseTrainer(object):
         self.use_focal_ls_a = config['use_focal_ls_a']
         self.use_focal_ls_d = config['use_focal_ls_d']
         self.use_focal_ls_dr = config['use_focal_ls_dr']
+        self.orthogonal_ls = config['orthogonal_ls']
+        self.orthogonal_ls_w = config['orthogonal_ls_w']
 
         if self.region_cls:
             if self.use_focal_ls_r:
@@ -130,6 +132,7 @@ class BaseTrainer(object):
         self.start_epoch = 1
         self.checkpoint_dir = os.path.join(config['output'], config['dataset_name'], config['exp_name'])
         self.best_epoch = 0
+        self.print_freq = config['print_freq']
 
         # keys to cuda
         self.keys = set(
@@ -368,10 +371,10 @@ class Trainer(BaseTrainer):
         disr_losses = AverageMeter()
         region_cls_losses = AverageMeter()
         attribute_cls_losses = AverageMeter()
+        orthogonal_losses = AverageMeter()
         norm_meter = AverageMeter()
         num_steps = len(self.train_dataloader)
         self.model.train()
-        # cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
         self.optimizer.zero_grad()
         device = self.model.device
         img2attinfo = {}
@@ -434,6 +437,11 @@ class Trainer(BaseTrainer):
                         else:
                             raise NotImplementedError
 
+                    if self.orthogonal_ls:
+                        orthogonal_loss = output['orthogonal_ls']
+                        loss = loss + self.orthogonal_ls_w * orthogonal_loss
+                        orthogonal_losses.update(orthogonal_loss.item())
+
 
                 self.scaler.scale(loss).backward()
 
@@ -454,16 +462,30 @@ class Trainer(BaseTrainer):
 
                 # self.lr_scheduler.step_update((epoch) * num_steps + batch_idx)
                 norm_meter.update(grad_norm)
-                memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
-                # cur_lr = [param_group['lr'] for param_group in self.optimizer.param_groups]
-                pbar.set_postfix(ce=f'{ce_losses.val:.3f} ({ce_losses.avg:.3f})\t',
-                                 dis_cls=f'{dis_cls_losses.val:.3f} ({dis_cls_losses.avg:.3f})\t',
-                                 disr_ls=f'{disr_losses.val:.3f} ({disr_losses.avg:.3f})\t',
-                                 rg_cls=f'{region_cls_losses.val:.3f} ({region_cls_losses.avg:.3f})\t',
-                                 att_cls=f'{attribute_cls_losses.val:.3f} ({attribute_cls_losses.avg:.3f})\t',
-                                 mem=f'mem {memory_used:.0f}MB',
-                                 norm=f'{norm_meter.val:.3f} ({norm_meter.avg:.3f})')
+                # memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+                # pbar.set_postfix(ce=f'{ce_losses.val:.3f} ({ce_losses.avg:.3f})\t',
+                #                  dis_cls=f'{dis_cls_losses.val:.3f} ({dis_cls_losses.avg:.3f})\t',
+                #                  disr_ls=f'{disr_losses.val:.3f} ({disr_losses.avg:.3f})\t',
+                #                  rg_cls=f'{region_cls_losses.val:.3f} ({region_cls_losses.avg:.3f})\t',
+                #                  att_cls=f'{attribute_cls_losses.val:.3f} ({attribute_cls_losses.avg:.3f})\t',
+                #                  mem=f'mem {memory_used:.0f}MB',
+                #                  norm=f'{norm_meter.val:.3f} ({norm_meter.avg:.3f})')
                 pbar.update()
+
+                if batch_idx % self.print_freq == 0:
+                    memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+                    cur_lr = [round(param_group['lr'],7) for param_group in self.optimizer.param_groups]
+                    self.logger.info(
+                        f'lr:{cur_lr}\t'
+                        f'ce_cls:{ce_losses.val:.3f}({ce_losses.avg:.3f})\t'
+                        f'dis_cls:{dis_cls_losses.val:.3f}({dis_cls_losses.avg:.3f}) '
+                        f'disr_ls:{disr_losses.val:.3f}({disr_losses.avg:.3f}) '
+                        f'rg_cls:{region_cls_losses.val:.3f}({region_cls_losses.avg:.3f}) '
+                        f'og_ls:{orthogonal_losses.val:.3f}({orthogonal_losses.avg:.3f}) '
+                        f'att_cls:{attribute_cls_losses.val:.3f}({attribute_cls_losses.avg:.3f}) '
+                        f'mem {memory_used:.0f}MB '
+                        f'norm:{norm_meter.val:.3f}({norm_meter.avg:.3f})'
+                    )
 
             # torch.save(img2attinfo,'imgid2attinfo_train.pth')
             # exit()

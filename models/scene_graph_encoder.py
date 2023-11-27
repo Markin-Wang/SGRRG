@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import math
 import torch.nn.functional as F
+from modules.loss import OrthogonalLoss
 
 
 def clones(module, N):
@@ -40,6 +41,9 @@ class SceneGraphEncoder(nn.Module):
         self.hierarchical_attention = config['hierarchical_attention']
         self.pos_margin = config['pos_margin']
         self.neg_margin = config['neg_margin']
+        self.orthogonal_ls = config['orthogonal_ls']
+        if self.orthogonal_ls:
+            self.orthogonal_ls_criteria = OrthogonalLoss()
 
         assert not (
                 self.pooling is not None and self.hierarchical_attention), 'pooling and hierarchical attention cannot be both enabled '
@@ -167,12 +171,17 @@ class SceneGraphEncoder(nn.Module):
             sg_embeds, sg_masks, obj_embeds, obj_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks,
                                                                             batch_size)
 
+        if self.orthogonal_ls:
+            orthogonal_ls = self.orthogonal_ls_criteria(self.token_type_embeddings(obj_type))
+        else:
+            orthogonal_ls = None
+
         # if self.disr_cls and self.disr_opt=='cls':
         #     # disr_logits = self.disr_head(sg_embeds[:,0]) # the first column is the region embeds with the same order
         #     disr_logits = self.disr_head(sg_embeds)  # the first column is the region embeds with the same order
         # else:
 
-        return sg_embeds, sg_masks, obj_embeds, obj_masks, disr_ls_sg
+        return sg_embeds, sg_masks, obj_embeds, obj_masks, disr_ls_sg, orthogonal_ls
 
     def _prepare_att(self, att_labels):
         max_len = max(torch.sum(att_labels, dim=1))

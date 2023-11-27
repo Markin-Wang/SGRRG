@@ -3,6 +3,7 @@ from torchvision.ops.roi_pool import RoIPool
 from config import cgnome_id2cat as id2cat
 from modules.utils import init_weights, con_loss
 import torch
+from modules.loss import OrthogonalLoss
 
 class AttributePredictor(nn.Module):
     def __init__(self, config):
@@ -24,6 +25,7 @@ class AttributePredictor(nn.Module):
         if self.disr_opt == 'cls':
             self.disr_head = nn.Linear(config['d_vf'], 1)
             self.disr_head.apply(init_weights)
+
         # elif self.disr_opt == 'conatt':
         #     # apply contrastive loss
         #     pass
@@ -102,5 +104,6 @@ class AttributePredictor(nn.Module):
             sample_ids = box_labels == label_id
             logits_i = self.attribute_heads[label_id](x[sample_ids])
             logits[sample_ids, :id2cat[label_id]] = logits_i
+
         # box order to form the logits
         return x, logits, disr_logits

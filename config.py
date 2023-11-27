@@ -140,6 +140,9 @@ def config():
     # object-attribute decomposed (oa-d): node to node-att then nodes to nodes
     # object-attribute decomposed completely (oa-dc): node to att then nodes to nodes
 
+    orthogonal_ls = False # applied for obj embed
+    orthogonal_ls_w = 0.1
+
     #
     save_period = 1
     monitor_mode = 'max'
@@ -166,6 +169,8 @@ def config():
     early_exit = False  # used for test
     layer_id = 2  # the layer id in encoder to select attention
     pe = 'none'  # whether to use absolute position embedding in encoder
+
+    print_freq = 30
 
 
 @ex.named_config

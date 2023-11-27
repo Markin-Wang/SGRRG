@@ -21,9 +21,23 @@ def compute_loss(output, reports_ids, reports_masks):
     loss = criterion(output, reports_ids[:, 1:], reports_masks[:, 1:]).mean()
     return loss
 
+class OrthogonalLoss(nn.Module):
+    def __init__(self):
+        super(OrthogonalLoss, self).__init__()
 
-import torch
-import torch.nn as nn
+
+    def forward(self, x):
+    # x shape: [N, hidden_size]
+        loss = torch.mm(x, x.t())
+
+        loss = loss - torch.eye(x.size(0)).to(x.device)
+
+        # The loss is the sum of squares of the elements
+        # We only sum over the upper triangular part to avoid double-counting
+        loss = loss.triu(diagonal=1).pow(2).flatten()
+        loss = loss[loss != 0].mean()
+
+        return loss
 
 
 class AsymmetricLoss(nn.Module):
