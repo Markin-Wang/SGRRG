@@ -476,6 +476,7 @@ class Trainer(BaseTrainer):
                     memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
                     cur_lr = [round(param_group['lr'],7) for param_group in self.optimizer.param_groups]
                     self.logger.info(
+                        f'\n'
                         f'lr:{cur_lr}\t'
                         f'ce_cls:{ce_losses.val:.3f}({ce_losses.avg:.3f})\t'
                         f'dis_cls:{dis_cls_losses.val:.3f}({dis_cls_losses.avg:.3f}) '
@@ -485,6 +486,7 @@ class Trainer(BaseTrainer):
                         f'att_cls:{attribute_cls_losses.val:.3f}({attribute_cls_losses.avg:.3f}) '
                         f'mem {memory_used:.0f}MB '
                         f'norm:{norm_meter.val:.3f}({norm_meter.avg:.3f})'
+                        f'\n'
                     )
 
             # torch.save(img2attinfo,'imgid2attinfo_train.pth')
