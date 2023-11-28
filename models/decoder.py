@@ -132,9 +132,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
 
         bs_ids, selected_bs = past_data['bs_ids'], past_data['selected_bs']
 
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
-
-        x_img = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
+        x_img = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
 
         if self.hierarchical_attention:
             sg_embeds_pool, sg_embeds_pool_masks = past_data['sg_embeds_pool'], past_data['sg_embeds_pool_masks']
@@ -207,6 +205,9 @@ class SceneGraphAidedDecoderLayer(nn.Module):
                 x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
                 x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
                 x_img[selected_bs] = x_img[selected_bs] + x_
+
+        x_img = self.sublayer[1](x_img, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
+
 
         return self.sublayer[-1](x_img, self.feed_forward), self.cross_attn_img.attn
 
