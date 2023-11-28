@@ -119,7 +119,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
         if self.hierarchical_attention:
             self.cross_attn_subgraph = MultiHeadedAttention(self.num_heads, self.d_model)
             # self.cross_attn_whole = MultiHeadedAttention(self.num_heads, self.d_model)
-            self.aggregate_attn = AggregateAttention(self.d_model, h=self.num_heads)
+            self.aggregate_attn = AggregateTopAttention(self.d_model, h=self.num_heads)
             # self.query_proj = nn.Linear(self.d_model,self.d_model)
             # self.score_proj = nn.Linear(self.d_model, 1)
         else:
@@ -329,6 +329,54 @@ class AggregateAttention(nn.Module):
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
         # print(4444,x.shape)
         return self.linears[-1](x)
+
+class AggregateTopAttention(nn.Module):
+    def __init__(self, d_model, h=1, dropout=0.1):
+        super(AggregateTopAttention, self).__init__()
+        self.d_k = d_model // h
+        self.h = h
+        self.linears = clones(nn.Linear(d_model, d_model), 4)
+        if dropout > 0:
+            self.dropout = nn.Dropout(p=dropout)
+        else:
+            self.dropout = None
+
+    def forward(self, query, key, value, mask=None):
+        if mask is not None:
+            mask = mask.unsqueeze(1)
+        nbatches = query.size(0)
+        query, key = [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2) for l, x in
+                      zip(self.linears, (query, key))]
+
+        # from [bs, max_nodes, num_len, head, dhs] to [bs, num_head, num_len, max_node, dhs]
+        # print(1111,value.shape)
+        value = self.linears[2](value).view(nbatches, value.size(1), value.size(2), self.h, self.d_k).transpose(1, 3)
+        # print(2222,value.shape)
+
+        # x, self.attn = attention(query, key, value, mask=mask, dropout=self.dropout)
+        d_k = query.size(-1)
+
+        scores = (torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k))
+
+        if mask is not None:
+            scores = scores + mask
+
+        # p_attn = F.softmax(scores, dim=-1)
+
+        if self.dropout is not None:
+            scores = self.dropout(scores)
+
+
+        _, max_index =  torch.max(scores,dim=-1)
+
+        index = max_index.unsqueeze(-1).unsqueeze(-1).expand(-1,-1,-1,-1,value.size(-1))
+
+        value = torch.gather(value, 2, index=index).squeeze(-2)
+
+        # x [bs, num_head, num_token, 1, d_model]
+
+        value = value.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
+        return self.linears[-1](value)
 
 
 class SublayerConnection(nn.Module):
