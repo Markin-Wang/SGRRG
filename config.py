@@ -123,6 +123,7 @@ def config():
 
     # scene graph setting
     use_sg = False
+    before = False
     sgave = False # scene graph aided vision encoder
     use_obj_embeds = False # use obj embeds instead of scene graph embeds in vision encoder.
     sgade = False # scene graph aided decoder

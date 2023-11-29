@@ -110,6 +110,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
         self.dropout = config['dropout']
         self.fuse_opt = config['fuse_opt']
         self.hierarchical_attention = config['hierarchical_attention']
+        self.before = config['before']
         if self.fuse_opt == 'cat':
             self.fuse_proj = nn.Linear(self.d_model * 2, self.d_model)
 
@@ -128,88 +129,77 @@ class SceneGraphAidedDecoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(self.d_model, self.d_ff, self.dropout)
         self.sublayer = clones(SublayerConnection(self.d_model, self.dropout), 4)
 
-    def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, past_data):
+    def get_sg_embeds(self, x_, past_data, bs_ids, num_tokens, batch_size):
+        if 'num_nodes' not in past_data:
+            num_nodes = [(bs_ids == i).sum() for i in range(x_.shape[0])]
+            max_node = max(num_nodes)
+            past_data.update({'num_nodes': num_nodes, 'max_node': max_node})
+        else:
+            num_nodes, max_node = past_data['num_nodes'], past_data['max_node']
 
+        if 'pre_tsg_masks' not in past_data or past_data['pre_tsg_masks'].size(0) != batch_size:
+            # the second condition is for inference phase where the first forward has no beam search
+            # [bs, num_token, num_subgraph, hs]
+            sg_embeds = torch.zeros((batch_size, max_node, num_tokens, x_.shape[-1]), device=x_.device,dtype=x_.dtype)
+            pre_tsg_masks = torch.full((batch_size, max_node), torch.finfo(sg_embeds.dtype).min,device=x_.device)
+
+            for i in range(batch_size):
+                # print(x_[bs_ids == i].shape, sg_embeds.shape, sg_embeds_avg.shape)
+                sg_embeds[i, :num_nodes[i]] = x_[bs_ids == i]
+                pre_tsg_masks[i, :num_nodes[i]] = 0.0
+            past_data['pre_tsg_masks'] = pre_tsg_masks
+
+        else:
+            pre_tsg_masks = past_data['pre_tsg_masks']
+            sg_embeds = torch.zeros((batch_size * max_node, num_tokens, x_.shape[-1]), device=x_.device,
+                                    dtype=x_.dtype)
+            sg_embeds[(pre_tsg_masks == 0).view(-1)] = x_
+            sg_embeds = sg_embeds.view(batch_size, max_node, num_tokens, x_.shape[-1])
+
+        return sg_embeds
+
+    def foward_sgattn(self, x, past_data, sg_embeds=None, sg_masks=None ):
         bs_ids, selected_bs = past_data['bs_ids'], past_data['selected_bs']
-
-        x_img = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
-
         if self.hierarchical_attention:
             sg_embeds_pool, sg_embeds_pool_masks = past_data['sg_embeds_pool'], past_data['sg_embeds_pool_masks']
-            if self.fuse_opt == 'add':
-                x_ = x[bs_ids.long()]  # expand to make each sub-graph in a sample has the same image query
-            else:
-                x_ = x_img[bs_ids.long()]
-
+            x_ = x[bs_ids.long()]  # expand to make each sub-graph in a sample has the same image query
 
             x_ = self.cross_attn_subgraph(x_, sg_embeds, sg_embeds, sg_masks)
             # [num_boxes, num_token, hs]
 
-            if 'num_nodes' not in past_data:
-                num_nodes= [(bs_ids == i).sum() for i in range(x_.shape[0])]
-                max_node =  max(num_nodes)
-                past_data.update({'num_nodes':num_nodes, 'max_node':max_node})
-            else:
-                num_nodes, max_node = past_data['num_nodes'], past_data['max_node']
+            sg_embeds = self.get_sg_embeds(x_, past_data, bs_ids, x.size(1), x.size(0))
 
-            if 'pre_tsg_masks' not in past_data or past_data['pre_tsg_masks'].size(0) != x.size(0):
-                # the second condition is for inference phase where the first forward has no beam search
-                # [bs, num_token, num_subgraph, hs]
-                sg_embeds = torch.zeros((x.shape[0], max_node, x.shape[1], x_.shape[-1]), device=x_.device,
-                                        dtype=x_.dtype)
-                pre_tsg_masks = torch.full((x.shape[0], max_node), torch.finfo(sg_embeds.dtype).min,
-                                           device=sg_embeds.device)
-
-                for i in range(x.shape[0]):
-                    # print(x_[bs_ids == i].shape, sg_embeds.shape, sg_embeds_avg.shape)
-                    sg_embeds[i, :num_nodes[i]] = x_[bs_ids == i]
-                    pre_tsg_masks[i, :num_nodes[i]] = 0.0
-
-                past_data['pre_tsg_masks'] = pre_tsg_masks
-
-            else:
-                pre_tsg_masks = past_data['pre_tsg_masks']
-                sg_embeds = torch.zeros((x.shape[0] * max_node, x.shape[1], x_.shape[-1]), device=x_.device,
-                                        dtype=x_.dtype)
-                sg_embeds[(pre_tsg_masks == 0).view(-1)] = x_
-                sg_embeds = sg_embeds.view(x.shape[0], max_node, x.shape[1], x_.shape[-1])
-            # only perform attention for those samples having the sg
-
-            if self.fuse_opt == 'add':
-                x_ = self.sublayer[2](x[selected_bs], lambda x: self.aggregate_attn(x, sg_embeds_pool[selected_bs],
-                                                                        sg_embeds[selected_bs],
-                                                                        sg_embeds_pool_masks[selected_bs]))
-                x_img[selected_bs] = x_img[selected_bs] + x_
-
-            else:
-                x_ = self.sublayer[2](x_img[selected_bs], lambda x: self.aggregate_attn(x, sg_embeds_pool[selected_bs],
-                                                                        sg_embeds[selected_bs],
-                                                                        sg_embeds_pool_masks[selected_bs]))
-                x_img[selected_bs] = x_
-
+            x_ = self.sublayer[2](x[selected_bs], lambda x: self.aggregate_attn(x, sg_embeds_pool[selected_bs],
+                                                                                sg_embeds[selected_bs],
+                                                                                sg_embeds_pool_masks[selected_bs]))
         else:
             # selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
             # cross_mask bs x 1 x len_sg
-            if self.fuse_opt == 'att':
-                x_, sg_embeds_, sg_masks_ = x_img[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
-                x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
-                x_img[selected_bs] = x_
+            x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
+            x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
 
-            elif self.fuse_opt == 'cat':
-                x_, sg_embeds_, sg_masks_ = x_img[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
-                x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
-                x_img[selected_bs] = self.fuse_proj(torch.cat([x[selected_bs], x_], dim=-1)).to(dtype=x.dtype)
+        if self.fuse_opt == 'att':
+            x[selected_bs] = x_
+        elif self.fuse_opt == 'cat':
+            x[selected_bs] = self.fuse_proj(torch.cat([x[selected_bs], x_], dim=-1)).to(dtype=x.dtype)
+        elif self.fuse_opt == 'add':
+            x[selected_bs] = x[selected_bs] + x_
 
-            elif self.fuse_opt == 'add':
-                x_img = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
-                x_, sg_embeds_, sg_masks_ = x[selected_bs], sg_embeds[selected_bs], sg_masks[selected_bs]
-                x_ = self.sublayer[2](x_, lambda x: self.cross_attn_sg(x, sg_embeds_, sg_embeds_, sg_masks_))
-                x_img[selected_bs] = x_img[selected_bs] + x_
+        return x
 
-        x_img = self.sublayer[1](x_img, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
+    def forward(self, x, img_feats, self_mask, img_masks, sg_embeds, sg_masks, past_data):
 
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, self_mask))
 
-        return self.sublayer[-1](x_img, self.feed_forward), self.cross_attn_img.attn
+        if self.before:
+             x = self.foward_sgattn(x, past_data, sg_embeds, sg_masks)
+             x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
+
+        else:
+            x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
+            x = self.foward_sgattn(x,past_data,sg_embeds, sg_masks)
+
+        return self.sublayer[-1](x, self.feed_forward), self.cross_attn_img.attn
 
 
 class MultiHeadedAttention(nn.Module):
