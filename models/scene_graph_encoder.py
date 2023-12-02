@@ -274,7 +274,9 @@ class SceneGraphEncoder(nn.Module):
         num_nodes = torch.sum(node_masks, dim=-1)
         max_len = max([(node_masks[bs_ids==i]).sum() for i in range(batch_size)])
         obj_indicator = torch.zeros((node_masks.size(0),node_masks.size(1)), device=node_masks.device)
+
         obj_indicator[:, 0] = 1 # the first column is obj masks
+        att_mask_indicator = torch.arange(0,len(node_embeds)).unsqueeze(-1).repeat(1,node_masks.size(1)).to(node_masks.device)
 
         reformed_node_embeds = torch.zeros((batch_size, max_len, node_embeds.shape[-1]), device=node_embeds.device)
         reformed_node_masks = torch.full((batch_size, max_len, max_len), torch.finfo(node_embeds.dtype).min,
@@ -286,8 +288,10 @@ class SceneGraphEncoder(nn.Module):
             cur_node_masks = node_masks[cur_bs_ids]
             cur_node_embeds = node_embeds[cur_bs_ids][cur_node_masks]
             cur_obj_indicator = obj_indicator[cur_bs_ids][cur_node_masks]
+            cur_att_mask_indicator = att_mask_indicator[cur_bs_ids][cur_node_masks]
 
             cur_num_nodes = num_nodes[cur_bs_ids].sum()
+
 
             if cur_num_nodes == 0:
                 self.zero_count += 1
@@ -297,13 +301,23 @@ class SceneGraphEncoder(nn.Module):
                 sg_masks[i, 0, :cur_num_nodes] = 0.0
 
                 num_obj = cur_obj_indicator.sum().long()
-                obj_masks =  torch.full((num_obj, cur_num_nodes), torch.finfo(node_embeds.dtype).min,
-                                         device=node_embeds.device)
-                obj_masks[:, cur_obj_indicator==1] = 0.0
+                # obj_masks =  torch.full((num_obj, cur_num_nodes), torch.finfo(node_embeds.dtype).min,
+                #                          device=node_embeds.device)
+                # obj_masks[:, cur_obj_indicator==1] = 0.0
 
-                reformed_node_masks[i, :cur_num_nodes, :cur_num_nodes][cur_obj_indicator==1] = obj_masks
+                num_att = len(cur_obj_indicator) - num_obj
+                cur_att_mask_idx = cur_att_mask_indicator[cur_obj_indicator==0]
+                cur_att_mask_indicator_ = cur_att_mask_indicator.unsqueeze(0).repeat(num_att, 1)
+                att_masks = cur_att_mask_indicator_ == cur_att_mask_idx.unsqueeze(-1)
 
-                reformed_node_masks[i, :cur_num_nodes, :cur_num_nodes][cur_obj_indicator==0] = 0.0
+                cur_att_mask_indicator_ = cur_att_mask_indicator.unsqueeze(0).repeat(num_obj, 1)
+                cur_obj_mask_idx = cur_att_mask_indicator[cur_obj_indicator == 1]
+                obj_masks = cur_att_mask_indicator_ == cur_obj_mask_idx.unsqueeze(-1)
+                obj_masks[:, cur_obj_indicator==1] = True
+
+                reformed_node_masks[i, :cur_num_nodes, :cur_num_nodes][cur_obj_indicator==1][obj_masks] = 0.0
+
+                reformed_node_masks[i, :cur_num_nodes, :cur_num_nodes][cur_obj_indicator==0][att_masks] = 0.0
 
         return reformed_node_embeds, reformed_node_masks, sg_masks
 
