@@ -194,7 +194,7 @@ class SceneGraphEncoder(nn.Module):
         return att_ids
 
     def _prepare_att_multi(self, att_labels, box_labels):
-        # note in inferece, the att_id is per head from 0 to x, mapping is needed to ensure consistency
+        # note in inference, the att_id is per head from 0 to x, mapping is needed to ensure consistency
         max_len = max(torch.sum(att_labels, dim=1))
         bs = att_labels.shape[0]
         att_ids = torch.full((bs, max_len), self.att_pad_idx, device=att_labels.device, dtype=torch.long)
@@ -290,7 +290,7 @@ class SceneGraphEncoder(nn.Module):
             cur_obj_indicator = obj_indicator[cur_bs_ids][cur_node_masks]
             cur_att_mask_indicator = att_mask_indicator[cur_bs_ids][cur_node_masks]
 
-            cur_num_nodes = num_nodes[cur_bs_ids].sum()
+            cur_num_nodes = len(cur_node_embeds)
 
 
             if cur_num_nodes == 0:
@@ -315,9 +315,14 @@ class SceneGraphEncoder(nn.Module):
                 obj_masks = cur_att_mask_indicator_ == cur_obj_mask_idx.unsqueeze(-1)
                 obj_masks[:, cur_obj_indicator==1] = True
 
-                reformed_node_masks[i, :cur_num_nodes, :cur_num_nodes][cur_obj_indicator==1][obj_masks] = 0.0
-
-                reformed_node_masks[i, :cur_num_nodes, :cur_num_nodes][cur_obj_indicator==0][att_masks] = 0.0
+                # if yo use chain index like a[b][c], a[b] only return the copy view
+                cur_node_mask = reformed_node_masks[i, :cur_num_nodes, :cur_num_nodes]
+                cur_obj_mask = cur_node_mask[cur_obj_indicator==1]
+                cur_obj_mask[obj_masks] = 0.0
+                cur_node_mask[cur_obj_indicator == 1] = cur_obj_mask
+                cur_att_mask = cur_node_mask[cur_obj_indicator==0]
+                cur_att_mask[att_masks] = 0.0
+                cur_node_mask[cur_obj_indicator == 0] = cur_att_mask
 
         return reformed_node_embeds, reformed_node_masks, sg_masks
 
