@@ -95,18 +95,6 @@ class SceneGraphEncoder(nn.Module):
         )
 
     def forward(self, boxes, box_feats, box_labels, batch_size, att_ids=None, att_probs=None, box_abnormal_labels=None):
-        # for one head
-        # if att_ids is None:
-        #     # for inference, generate the att_ids from the att_probs
-        #     assert att_probs is not None
-        #     att_labels = att_probs > self.att_select_threshold
-        #     att_masks = self.attribute_masks[box_labels]
-        #     att_labels = att_labels & att_masks
-        #     att_count = att_labels.sum(-1)
-        #     self.zero_att_count += (att_count == 0).sum()
-        #     self.all_box_count += att_count.shape[0]
-        #     print(f'{self.zero_att_count/self.all_box_count*100:.2f}% boxes without any attributes predicted.')
-        #     att_ids = self._prepare_att(att_labels)
 
         # for multi-head
         if att_ids is None:
@@ -132,8 +120,8 @@ class SceneGraphEncoder(nn.Module):
             att_type = torch.full((att_ids.shape[0], 1), 1, device=att_ids.device)
             obj_type = torch.full_like(box_labels, 0, dtype=torch.long)
 
-        att_embed = self.att_embedding(att_ids) + self.token_type_embeddings(att_type)
-        att_embed = self.pre_dropout(self.att_norm(att_embed))
+        att_embeds = self.att_embedding(att_ids) + self.token_type_embeddings(att_type)
+        att_embeds = self.pre_dropout(self.att_norm(att_embeds))
         # att_embed = self.pre_dropout(att_embed)
 
         obj_embeds = self.proj(box_feats) + self.token_type_embeddings(obj_type)
@@ -142,16 +130,18 @@ class SceneGraphEncoder(nn.Module):
         obj_masks = torch.full((obj_embeds.shape[0], 1), 0.0, device=obj_embeds.device)
 
         if self.encode_type == 'oa-c':
-            node_embeds = torch.cat((obj_embeds, att_embed), dim=1)
+            node_embeds = torch.cat((obj_embeds, att_embeds), dim=1)
             node_masks = torch.cat((obj_masks, att_masks), dim=1).unsqueeze(1)  # [bs,1,L]
             sg_embeds = self.sg_encoder(node_embeds, node_masks)
         elif self.encode_type.startswith('oa-d'):
-            node_embeds = torch.cat((obj_embeds, att_embed), dim=1)
+            node_embeds = torch.cat((obj_embeds, att_embeds), dim=1)
             node_masks = torch.cat((obj_masks, att_masks), dim=1).unsqueeze(1)  # [bs,1,L]
             sg_embeds = self.sg_encoder(node_embeds, node_masks, boxes[:, 0])
-        elif self.encode_type == 'oa-dc':
-            node_masks = None
-            sg_embeds = self.sg_encoder(obj_embeds, obj_masks, att_embed, att_masks)
+        elif self.encode_type == 'oa-pm':
+            node_embeds = torch.cat((obj_embeds, att_embeds), dim=1)
+            node_masks = torch.cat((obj_masks, att_masks), dim=1)
+            node_embeds, node_masks, sg_masks = self._to_bs_format_prefix(boxes[:, 0], node_embeds, node_masks,batch_size)
+            sg_embeds = self.sg_encoder(node_embeds, node_masks)
         else:
             raise NotImplementedError
 
@@ -170,8 +160,11 @@ class SceneGraphEncoder(nn.Module):
         elif self.hierarchical_attention:
             sg_masks = node_masks
         else:
-            sg_embeds, sg_masks, obj_embeds, obj_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks,
-                                                                            batch_size)
+            if self.encode_type == 'oa-pm':
+                obj_embeds, obj_masks = None, None
+            else:
+                sg_embeds, sg_masks, obj_embeds, obj_masks = self._to_bs_format(boxes[:, 0], sg_embeds, node_masks,
+                                                                                batch_size)
 
         if self.orthogonal_ls:
             orthogonal_ls = self.orthogonal_ls_criteria(self.token_type_embeddings(obj_type))
@@ -257,13 +250,11 @@ class SceneGraphEncoder(nn.Module):
             1), reformed_obj_embeds, reformed_obj_masks
 
     def _to_bs_format_pool(self, bs_ids, node_embeds, node_masks, batch_size):
+        node_masks_ = node_masks == 0
 
-        bs_len = [(bs_ids == i).sum() for i in range(batch_size)]
-        node_masks = node_masks == 0
-
-        node_embeds = [torch.max(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)[0]
+        node_embeds = [torch.max(node_embeds[i, node_masks_[i, 0]], dim=0, keepdim=True)[0]
                        if self.pooling == 'max' else
-                       torch.mean(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)
+                       torch.mean(node_embeds[i, node_masks_[i, 0]], dim=0, keepdim=True)
                        for i in range(node_embeds.shape[0])
                        ]
         node_embeds = torch.cat(node_embeds, dim=0)
@@ -277,6 +268,44 @@ class SceneGraphEncoder(nn.Module):
             reformed_node_masks[i, :bs_len[i]] = 0.0
 
         return reformed_node_embeds, reformed_node_masks.unsqueeze(1)
+
+    def _to_bs_format_prefix(self, bs_ids, node_embeds, node_masks, batch_size):
+        node_masks = node_masks == 0
+        num_nodes = torch.sum(node_masks, dim=-1)
+        max_len = max([(node_masks[bs_ids==i]).sum() for i in range(batch_size)])
+        obj_indicator = torch.zeros((node_masks.size(0),node_masks.size(1)), device=node_masks.device)
+        obj_indicator[:, 0] = 1 # the first column is obj masks
+
+        reformed_node_embeds = torch.zeros((batch_size, max_len, node_embeds.shape[-1]), device=node_embeds.device)
+        reformed_node_masks = torch.full((batch_size, max_len, max_len), torch.finfo(node_embeds.dtype).min,
+                                         device=node_embeds.device)
+        sg_masks = torch.full((batch_size,1, max_len), torch.finfo(node_embeds.dtype).min, device=node_embeds.device)
+
+        for i in range(batch_size):
+            cur_bs_ids = bs_ids == i
+            cur_node_masks = node_masks[cur_bs_ids]
+            cur_node_embeds = node_embeds[cur_bs_ids][cur_node_masks]
+            cur_obj_indicator = obj_indicator[cur_bs_ids][cur_node_masks]
+
+            cur_num_nodes = num_nodes[cur_bs_ids].sum()
+
+            if cur_num_nodes == 0:
+                self.zero_count += 1
+
+            else:
+                reformed_node_embeds[i, :cur_num_nodes] = cur_node_embeds
+                sg_masks[i, 0, :cur_num_nodes] = 0.0
+
+                num_obj = cur_obj_indicator.sum().long()
+                obj_masks =  torch.full((num_obj, cur_num_nodes), torch.finfo(node_embeds.dtype).min,
+                                         device=node_embeds.device)
+                obj_masks[:, cur_obj_indicator==1] = 0.0
+
+                reformed_node_masks[i, :cur_num_nodes, :cur_num_nodes][cur_obj_indicator==1] = obj_masks
+
+                reformed_node_masks[i, :cur_num_nodes, :cur_num_nodes][cur_obj_indicator==0] = 0.0
+
+        return reformed_node_embeds, reformed_node_masks, sg_masks
 
 
 class SGEncoder(nn.Module):
@@ -294,7 +323,7 @@ class SGEncoder(nn.Module):
         self.input_encoding_size = config['d_model']
         self.drop_prob_lm = config['drop_prob_lm']
 
-        if self.encode_type == 'oa-c':
+        if self.encode_type == 'oa-c' or self.encode_type == 'oa-pm':
             # object-attribute coupled: node-att to node-att
             self.layers = clones(SGOACEncoderLayer(config), self.num_layers)
         elif self.encode_type == 'oa-d' or self.encode_type == 'oa-dc':

@@ -59,7 +59,7 @@ class BeamSearch:
                                       'num_nodes': num_nodes,
                                       })
                 else:
-                    past_data['selected_bs'] = (sg_masks.squeeze(1) == 0).sum(-1) != 0
+                    past_data['selected_bs'] = (sg_masks[:,0] == 0).sum(-1) != 0
 
             past_data['bs_ids'] = bs_ids
 

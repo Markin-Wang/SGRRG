@@ -172,7 +172,7 @@ class RRGModel(nn.Module):
                 selected_bs = (sg_embeds_pool_masks.squeeze(1) == 0).sum(-1) != 0
                 past_data.update({'sg_embeds_pool': sg_embeds_pool, 'sg_embeds_pool_masks': sg_embeds_pool_masks})
             else:
-                selected_bs = (sg_masks.squeeze(1) == 0).sum(-1) != 0
+                selected_bs = (sg_masks[:,0]==0).sum(-1) != 0
             past_data.update({'selected_bs': selected_bs, 'bs_ids': boxes[:, 0]})
 
         text_embed, align_attns = self.get_text_feats(seq, patch_feats, self_mask=seq_masks, cross_mask=att_masks,
