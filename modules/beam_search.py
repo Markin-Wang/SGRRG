@@ -182,8 +182,8 @@ class BeamSearch:
         node_masks = node_masks == 0
 
         node_embeds = [torch.max(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)[0]
-                       # if self.pooling == 'max' else
-                       # torch.mean(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)
+                       if self.pooling == 'max' else
+                       torch.mean(node_embeds[i, node_masks[i, 0]], dim=0, keepdim=True)
                        for i in range(node_embeds.shape[0])
                        ]
         node_embeds = torch.cat(node_embeds, dim=0)

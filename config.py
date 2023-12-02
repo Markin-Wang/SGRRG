@@ -133,6 +133,7 @@ def config():
     use_focal_ls_r = False
     use_focal_ls_a = False
     encode_type = 'oa-c'
+    sub_graph_attn = False
     pooling = None
     hierarchical_attention = False
     neg_margin = 0.3 # neg_margin
