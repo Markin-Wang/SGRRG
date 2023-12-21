@@ -78,6 +78,8 @@ class BaseTrainer(object):
         self.use_focal_ls_dr = config['use_focal_ls_dr']
         self.orthogonal_ls = config['orthogonal_ls']
         self.orthogonal_ls_w = config['orthogonal_ls_w']
+        self.clip = config['clip']
+        self.clip_w = config['clip_w']
 
         if self.region_cls:
             if self.use_focal_ls_r:
@@ -367,6 +369,7 @@ class Trainer(BaseTrainer):
 
     def _train_epoch(self, epoch):
         ce_losses = AverageMeter()
+        clip_losses = AverageMeter()
         dis_cls_losses = AverageMeter()
         disr_losses = AverageMeter()
         region_cls_losses = AverageMeter()
@@ -437,6 +440,12 @@ class Trainer(BaseTrainer):
                         else:
                             raise NotImplementedError
 
+                    if self.clip:
+                        clip_loss = output['clip_loss']
+                        loss = loss + self.clip_w * clip_loss
+                        clip_losses.update(clip_loss.item())
+
+
                     if self.orthogonal_ls:
                         orthogonal_loss = output['orthogonal_ls']
                         loss = loss + self.orthogonal_ls_w * orthogonal_loss
@@ -484,6 +493,7 @@ class Trainer(BaseTrainer):
                         f'rg_cls:{region_cls_losses.val:.3f}({region_cls_losses.avg:.3f}) '
                         f'og_ls:{orthogonal_losses.val:.3f}({orthogonal_losses.avg:.3f}) '
                         f'att_cls:{attribute_cls_losses.val:.3f}({attribute_cls_losses.avg:.3f}) '
+                        f'clip_ls:{clip_losses.val:.3f}({clip_losses.avg:.3f}) '
                         f'mem {memory_used:.0f}MB '
                         f'norm:{norm_meter.val:.3f}({norm_meter.avg:.3f})'
                         f'\n'

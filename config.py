@@ -142,6 +142,11 @@ def config():
     # object-attribute decomposed (oa-d): node to node-att then nodes to nodes
     # object-attribute decomposed completely (oa-dc): node to att then nodes to nodes
 
+    # CLIP
+    clip = False
+    clip_w = 0.5
+    clip_ve = 'extractor'
+
     orthogonal_ls = False # applied for obj embed
     orthogonal_ls_w = 0.1
 

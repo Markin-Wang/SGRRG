@@ -9,7 +9,7 @@ from modules.standard_trans import EncoderDecoder as st_trans
 from modules.my_encoder_decoder import LayerNorm
 from modules.utils import load_ape
 from modules.standard_trans import subsequent_mask
-from modules.utils import init_weights, init_weights_origin
+from modules.utils import init_weights, init_weights_origin, compute_clip_loss
 from .attribute_predictor import AttributePredictor
 from .region_selector import RegionSelector
 from .scene_graph_encoder import SceneGraphEncoder
@@ -38,6 +38,9 @@ class RRGModel(nn.Module):
         self.hierarchical_attention = config['hierarchical_attention']
         self.hidden_size = config['d_model']
         self.d_ff = config['d_ff']
+
+        self.clip = config['clip']
+        self.clip_ve = config['clip_ve']
 
         self.att_feat_size = config['d_vf']
         self.use_ln = config['use_ln']
@@ -88,6 +91,16 @@ class RRGModel(nn.Module):
         if self.use_sg:
             assert self.att_cls and self.region_cls, 'region cls and attribute cls should be enabled.'
             self.scene_graph_encoder = SceneGraphEncoder(config)  # init in that module
+
+        if self.clip:
+            self.proj_image_clip = nn.Linear(self.hidden_size, self.hidden_size)
+            self.proj_text_clip = nn.Linear(self.hidden_size, self.hidden_size)
+            self.proj_image_clip.apply(init_weights)
+            self.proj_text_clip.apply(init_weights)
+            self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+            self.loss_clip = nn.CrossEntropyLoss()
+
+
 
     # if self.att_cls:
 
@@ -155,6 +168,9 @@ class RRGModel(nn.Module):
         # obtain seq mask, should generated in dataloader
         patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
 
+        if self.clip and self.clip_ve == 'extractor':
+            avg_img_feats = torch.mean(patch_feats, dim=1)
+
         if self.sgave:
             if self.use_obj_embeds:
                 patch_feats = self.encode_img_feats(patch_feats, att_masks, obj_embeds, obj_masks)
@@ -180,12 +196,29 @@ class RRGModel(nn.Module):
         # output, align_attns = self.encoder_decoder(encoded_img_feats, seq, att_masks, seq_mask)
         output = self.rrg_head(text_embed)
 
+        if self.clip:
+            if self.clip_ve == 'encoder':
+                avg_img_feats = torch.mean(patch_feats, dim=1)
+            clip_mask = (seq.data > 0)
+            clip_mask[:, 0] += True
+
+            avg_text_feats = torch.stack([torch.mean(text_embed[i, clip_mask[i]], dim=0) for i in range(text_embed.shape[0])], dim=0)
+            img_feats_clip, text_feats_clip = self.proj_image_clip(avg_img_feats), self.proj_text_clip(avg_text_feats)
+
+            img_feats_clip = img_feats_clip / img_feats_clip.norm(dim=-1, keepdim=True)
+            text_feats_clip = text_feats_clip / text_feats_clip.norm(dim=-1, keepdim=True)
+            # clip_loss = compute_clip_loss(img_feats_clip, text_feats_clip)
+            clip_loss = compute_clip_loss(img_feats_clip, text_feats_clip, self.logit_scale, self.loss_clip)
+        else:
+            clip_loss = None
+
         return_dicts.update({'rrg_preds': output,
                              'region_logits': region_logits,
                              'att_logits': att_logits,
                              'dis_logits': dis_logits,
                              'disr_logits': disr_ls_sg if self.disr_opt and 'sg' in self.disr_opt else disr_logits,
                              'orthogonal_ls': orthogonal_ls,
+                             'clip_loss': clip_loss,
                              })
 
         return return_dicts

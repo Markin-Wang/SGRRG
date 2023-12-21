@@ -613,3 +613,20 @@ def create_distance_correlation(tensor):
     distance_correlation = distance_covariance / (torch.sqrt(distance_variance1) * torch.sqrt(distance_variance2))
 
     print("Distinct Pairwise Distance Correlation:", distance_correlation.item())
+
+
+def compute_clip_loss(image_features, text_features, logit_scale, loss_clip):
+
+    # normalized features
+    ground_truth = torch.arange(len(image_features), dtype=torch.long, device=image_features.device)
+    image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+    # cosine similarity as logits
+    logit_scale = logit_scale.exp()
+    logits_per_image = logit_scale * image_features @ text_features.t()
+    logits_per_text = logit_scale * text_features @ image_features.t()
+    total_loss = (loss_clip(logits_per_image, ground_truth) + loss_clip(logits_per_text, ground_truth)) / 2
+
+    # shape = [global_batch_size, global_batch_size]
+    return total_loss
