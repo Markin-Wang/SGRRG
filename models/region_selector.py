@@ -12,11 +12,11 @@ class RegionSelector(nn.Module):
         self.use_mem = config['use_mem_r']
         self.drop_prob = config['dropout']
         self.fuse_opt = config['fuse_opt']
+        self.ff = nn.Linear(config['d_vf'], config['d_vf'])
+        self.ff.apply(init_weights)
         # memory settings
         if self.use_mem:
             self.topk = config['topk']
-            self.ff = nn.Linear(config['d_vf'], config['d_vf'])
-            self.ff.apply(init_weights)
 
             self.cmn = MultiThreadMemory(config['num_heads_r'], self.feature_size, topk=self.topk)
             self.memory = nn.Parameter(torch.FloatTensor(config['num_mem'], self.feature_size))
