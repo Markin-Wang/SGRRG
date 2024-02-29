@@ -204,7 +204,7 @@ class SceneGraphAidedDecoderLayer(nn.Module):
             x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
             if self.gate:
                 alpha = torch.sigmoid(self.gate_w(x))
-                x = alpha * self.foward_sgattn(x,past_data,sg_embeds, sg_masks) + (1-alpha) * x
+                x = (1-alpha) * self.foward_sgattn(x,past_data,sg_embeds, sg_masks) + alpha * x
             else:
                 x = self.foward_sgattn(x,past_data,sg_embeds, sg_masks)
 
