@@ -656,8 +656,8 @@ class Trainer(BaseTrainer):
                 log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
                 if split != 'test':
                     val_res, val_gts = None, None
-        if split == 'test':
-            torch.save([img_ids_list,selected_regions,att_recrod_preds],'test_sg_data.pth')
+        # if split == 'test':
+        #     torch.save([img_ids_list,selected_regions,att_recrod_preds],'test_sg_data.pth')
 
 
         return log, val_res, val_gts, img_ids, val_res_all
