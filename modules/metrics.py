@@ -23,6 +23,7 @@ class CaptionScorer:
         :print: Evaluation score (the mean of the scores of all the instances) for each measure
         """
         eval_res = {}
+        eval_res_all = {}
         for scorer, method in self.scorers:
             try:
                 score, scores = scorer.compute_score(gts, res, verbose=0)
@@ -31,9 +32,12 @@ class CaptionScorer:
             if type(method) == list:
                 for sc, m in zip(score, method):
                     eval_res[m] = sc
+                for sc, m in zip(scores, method):
+                    eval_res_all[m] = sc
             else:
                 eval_res[method] = score
-        return eval_res
+                eval_res_all[method] = scores
+        return eval_res, eval_res_all
 
 def compute_scores(gts, res):
     """

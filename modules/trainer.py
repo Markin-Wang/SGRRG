@@ -525,8 +525,7 @@ class Trainer(BaseTrainer):
         region_preds, region_targets = [], []
         dis_preds, dis_targets = [], []
         attribute_preds, attribute_targets = defaultdict(list), defaultdict(list)
-        img_ids = []
-        img2attinfo = {}
+        img_ids, img_ids_list, selected_regions, att_recrod_preds = [], [], [], []
 
         with tqdm(desc=f'Epoch %d - {split}' % epoch, unit='it', total=len(dataloader),
                   disable=dist.get_rank() != self.local_rank) as pbar:
@@ -566,6 +565,10 @@ class Trainer(BaseTrainer):
                             region_logits = output['region_logits'][region_masks]
                             region_probs = output['region_probs'][region_masks]
 
+                            if split == 'test':
+                                selected_regions.append([(output['region_probs']>=0.2).cpu(),region_masks.cpu()])
+                                img_ids_list.append(data['img_id'])
+
                             if len(region_labels) > 0:
                                 region_preds, region_targets, val_region_cls_loss  = get_loss_and_list(region_logits,
                                                                      region_labels, region_preds,
@@ -585,6 +588,7 @@ class Trainer(BaseTrainer):
                                             att_probs_record[bs_id][box_label][:cgnome_id2cat[box_label]].unsqueeze(0))
                                         attribute_targets[box_label].append(
                                             attribute_labels[bs_id][box_label])
+                            att_recrod_preds.append(att_probs_record)
 
                         output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
                         # else:
@@ -647,13 +651,16 @@ class Trainer(BaseTrainer):
                     val_res, val_gts = self.tokenizer.decode_batch(val_res.cpu().numpy()), self.tokenizer.decode_batch(
                         val_gts.cpu().numpy())
 
-                val_met = self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},
+                val_met, val_res_all= self.metric_ftns({i: [gt] for i, gt in enumerate(val_gts)},
                                            {i: [re] for i, re in enumerate(val_res)})
                 log.update(**{f'{split}_' + k: v for k, v in val_met.items()})
                 if split != 'test':
                     val_res, val_gts = None, None
+        if split == 'test':
+            torch.save([img_ids_list,selected_regions,att_recrod_preds],'test_sg_data.pth')
 
-        return log, val_res, val_gts, img_ids
+
+        return log, val_res, val_gts, img_ids, val_res_all
 
     def _pad(self, data):
         padded_data = torch.full((len(data), self.max_seq_length - 1), self.pad_idx, device=data[0].device)
@@ -663,18 +670,18 @@ class Trainer(BaseTrainer):
 
     def test(self, save_dir=''):
         self.logger.info('Starting evaluating the best checkpoint in test set.')
-        log, val_res, val_gts, img_ids = self._valid(0, 'test')
+        log, val_res, val_gts, img_ids, val_res_all = self._valid(0, 'test')
         self.logger.info('The result for the best performed models in test set.')
         for key, value in log.items():
             self.logger.info('\t{:15s}: {}'.format(str(key), value))
         save_dir = self.checkpoint_dir if len(save_dir) == 0 else save_dir
-        self.save_caption(val_res, val_gts, img_ids, log, save_dir=save_dir)
+        self.save_caption(val_res, val_res_all, val_gts, img_ids, log, save_dir=save_dir)
 
-    def save_caption(self, val_res, val_gts, img_ids, log, save_dir=''):
-
+    def save_caption(self, val_res,val_res_all, val_gts, img_ids, log, save_dir=''):
         rank = torch.distributed.get_rank()
-        data = (img_ids, val_res, val_gts)
-        save_data = [{'img_id': img_id, 'pred': pred, 'gt': gt} for img_id, pred, gt in zip(*data)]
+        val_res_all = [[val_res_all[m][i] for m in val_res_all.keys()] for i in range(len(img_ids))]
+        data = (img_ids, val_res, val_gts, val_res_all)
+        save_data = [{'img_id': img_id, 'pred': pred, 'gt': gt, 'score':val_res_cur} for img_id, pred, gt, val_res_cur in zip(*data)]
         save_data = [log] + save_data
         with open(f'caption_{rank}.json', 'w') as f:
             json.dump(save_data, f)

@@ -182,6 +182,8 @@ def config():
     random_mask = False
     mask_ratio = 0.01
 
+    gate = False
+
 
 @ex.named_config
 def task_train_caption_iu():

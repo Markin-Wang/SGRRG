@@ -288,6 +288,7 @@ class RRGModel(nn.Module):
         return_dicts.update({'encoded_img_feats': patch_feats,
                              'region_logits': region_logits,
                              'region_probs': region_probs,
+                             'region_record': [boxes.cpu(),box_labels.cpu()] if self.region_cls else None,
                              'att_probs_record': att_probs_record,
                              'dis_logits': dis_logits,
                              'dis_probs': dis_probs,

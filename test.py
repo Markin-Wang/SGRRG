@@ -6,7 +6,7 @@ import random
 from modules.tokenizers_origin import Tokenizer
 from modules.rule_tokenizer import RuleTokenizer
 from data.dataloaders import R2DataLoader
-from modules.metrics import compute_scores
+from modules.metrics import compute_scores, CaptionScorer
 from modules.optimizers import build_optimizer, build_lr_scheduler
 from modules.trainer import Trainer
 from modules.loss import compute_loss
@@ -79,6 +79,7 @@ def main(_config):
     # create data loader
     train_dataloader = R2DataLoader(_config, None, split='train', shuffle=True)
     tokenizer = train_dataloader.dataset.tokenizer  # remember to delete the old vocab when new one
+    all_texts = train_dataloader.dataset.all_texts
     _config['vocab_size'] = tokenizer.get_vocab_size()
 
     val_dataloader = R2DataLoader(_config, tokenizer, split='val', shuffle=False)
@@ -134,7 +135,7 @@ def main(_config):
 
     # get function handles of loss and metrics
     criterion = compute_loss
-    metrics = compute_scores
+    metrics = CaptionScorer(all_texts)
 
     # build optimizer, learning rate scheduler
 

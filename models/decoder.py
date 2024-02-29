@@ -111,8 +111,13 @@ class SceneGraphAidedDecoderLayer(nn.Module):
         self.fuse_opt = config['fuse_opt']
         self.hierarchical_attention = config['hierarchical_attention']
         self.before = config['before']
+        self.gate = config['gate']
         if self.fuse_opt == 'cat':
             self.fuse_proj = nn.Linear(self.d_model * 2, self.d_model)
+
+        if self.gate:
+            self.gate_w = nn.Linear(self.d_model,self.d_model, bias=True)
+
 
         self.self_attn = MultiHeadedAttention(self.num_heads, self.d_model)
         self.cross_attn_img = MultiHeadedAttention(self.num_heads, self.d_model)
@@ -197,7 +202,11 @@ class SceneGraphAidedDecoderLayer(nn.Module):
 
         else:
             x = self.sublayer[1](x, lambda x: self.cross_attn_img(x, img_feats, img_feats, img_masks))
-            x = self.foward_sgattn(x,past_data,sg_embeds, sg_masks)
+            if self.gate:
+                alpha = torch.sigmoid(self.gate_w(x))
+                x = alpha * self.foward_sgattn(x,past_data,sg_embeds, sg_masks) + (1-alpha) * x
+            else:
+                x = self.foward_sgattn(x,past_data,sg_embeds, sg_masks)
 
         return self.sublayer[-1](x, self.feed_forward), self.cross_attn_img.attn
 
