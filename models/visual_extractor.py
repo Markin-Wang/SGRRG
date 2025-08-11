@@ -83,7 +83,7 @@ class VisualExtractor(nn.Module):
 
 
     def forward(self, images, labels=None, mode='train'):
-        if self.dataset_name == 'iu_xray':
+        if self.dataset_name == 'iu_xrayas':
             if self.model_name.lower().startswith('vit'):
                 feats_1, attn_weights_1 = self.model.forward_patch_features(images[:, 0])
                 feats_2, attn_weights_2 = self.model.forward_patch_features(images[:, 1])

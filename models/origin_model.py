@@ -131,7 +131,7 @@ class RRGModel(nn.Module):
         if split == 'train':
             return self.forward_train(batch_dict)
 
-        return self.forward_test(batch_dict, split)
+        return self.forward_test_gtsg(batch_dict, split)
 
     def forward_train(self, batch_dict):
         images, targets = batch_dict['image'], batch_dict['text']
@@ -289,6 +289,67 @@ class RRGModel(nn.Module):
                              'region_logits': region_logits,
                              'region_probs': region_probs,
                              'region_record': [boxes.cpu(),box_labels.cpu()] if self.region_cls else None,
+                             'att_probs_record': att_probs_record,
+                             'dis_logits': dis_logits,
+                             'dis_probs': dis_probs,
+                             'disr_logits': disr_logits,
+                             # 'no_box_ids': no_box_ids,
+                             'sg_embeds': sg_embeds if self.sgade else None,
+                             'sg_masks': sg_masks if self.sgade else None,
+                             'bs_ids': boxes[:, 0] if self.use_sg else None,
+                             })
+
+        return return_dicts
+
+    def forward_test_gtsg(self, batch_dict, split='val'):
+        images, targets = batch_dict['image'], batch_dict['text']
+        region_logits, region_probs, att_logits, att_probs = None, None, None, None
+        dis_logits, dis_probs, disr_logits = None, None, None
+        box_abnormal_labels = None
+        return_dicts = {}
+        att_probs_record = defaultdict(dict)
+
+        patch_feats = self.extract_img_feats(images)
+
+        if self.dis_cls:
+            dis_logits = self.dis_head(patch_feats)
+            dis_probs = torch.sigmoid(dis_logits)
+
+
+
+        if self.region_cls:
+            boxes, box_labels, box_masks = batch_dict['boxes'], batch_dict['box_labels'], batch_dict['box_masks']
+            region_logits = self.region_selector(patch_feats, boxes, box_labels, box_masks)
+
+
+        if self.att_cls:
+            box_feats, att_logits, disr_logits = self.attribute_predictor(patch_feats, boxes, box_labels, box_masks,
+                                                                          box_abnormal_labels)
+            if self.use_box_feats:
+                patch_feats = box_feats
+
+        if self.use_sg:
+            attribute_ids = batch_dict['attribute_ids']
+            boxes, box_labels = boxes[box_masks], box_labels[box_masks]
+            sg_embeds, sg_masks, obj_embeds, obj_masks_, disr_ls_sg, orthogonal_ls \
+                = self.scene_graph_encoder(boxes, box_feats, box_labels, batch_size=patch_feats.size(0),
+                                           att_ids=attribute_ids, box_abnormal_labels=box_abnormal_labels)
+
+        patch_feats, seq, att_masks, seq_masks = self.prepare_feature_forward(patch_feats, None, targets)
+
+        if self.sgave:
+            assert self.use_sg
+            if self.use_obj_embeds:
+                patch_feats = self.encode_img_feats(patch_feats, att_masks, obj_embeds, obj_masks)
+            else:
+                patch_feats = self.encode_img_feats(patch_feats, att_masks, sg_embeds, sg_masks)
+        else:
+            patch_feats = self.encode_img_feats(patch_feats, att_masks)
+
+        return_dicts.update({'encoded_img_feats': patch_feats,
+                             'region_logits': region_logits,
+                             'region_probs': region_probs,
+                             #'region_record': [boxes.cpu(),box_labels.cpu()] if self.region_cls else None,
                              'att_probs_record': att_probs_record,
                              'dis_logits': dis_logits,
                              'dis_probs': dis_probs,

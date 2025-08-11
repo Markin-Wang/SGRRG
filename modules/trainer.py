@@ -541,7 +541,7 @@ class Trainer(BaseTrainer):
                     # continue
                     batch_dict = {key: data[key].to(device, non_blocking=True) for key in data.keys() if
                                   key in self.keys}
-                    if self.region_cls:
+                    if self.region_cls and split != 'test':
                         # boxes, box_labels, region_labels = data['boxes'].to(device, non_blocking=True), \
                         #                                    data['box_labels'].to(device, non_blocking=True), \
                         #                                    data['region_labels'].to(device, non_blocking=True)
@@ -552,7 +552,7 @@ class Trainer(BaseTrainer):
                     with autocast(dtype=torch.float16):
                         output = self.model(batch_dict, split=split)
 
-                        if self.dis_cls:
+                        if self.dis_cls and split != 'test':
                             dis_logits = output['dis_logits']
                             dis_probs = output['dis_probs']
                             dis_preds, dis_targets, val_dis_cls_loss  = get_loss_and_list(dis_logits,
@@ -561,7 +561,7 @@ class Trainer(BaseTrainer):
                                                                  cur_probs=dis_probs)
                             val_dis_cls_losses.update(val_dis_cls_loss.item())
 
-                        if self.region_cls:
+                        if self.region_cls and split != 'test':
                             region_logits = output['region_logits'][region_masks]
                             region_probs = output['region_probs'][region_masks]
 
@@ -578,7 +578,7 @@ class Trainer(BaseTrainer):
                                 val_region_cls_losses.update(val_region_cls_loss.item())
 
 
-                        if self.att_cls and split == 'test':
+                        if self.att_cls and split != 'test' and split !='train':
                             att_probs_record = output['att_probs_record']
                             attribute_labels = data['attribute_label_dicts']
                             for bs_id in att_probs_record.keys():
@@ -589,6 +589,7 @@ class Trainer(BaseTrainer):
                                         attribute_targets[box_label].append(
                                             attribute_labels[bs_id][box_label])
                             att_recrod_preds.append(att_probs_record)
+
 
                         output = self.beam_search.caption_test_step(self.model.module, batch_dict=output)
                         # else:
@@ -612,11 +613,11 @@ class Trainer(BaseTrainer):
                 # torch.save(img2attinfo, f'imgid2attinfo_{split}.pth')
                 # return log, val_res, val_gts, img_ids
 
-                if self.dis_cls:
+                if self.dis_cls and split != 'test':
                     dis_auc = calculate_auc(preds=dis_preds.numpy(), targets=dis_targets.long().numpy())
                     log.update({f'{split}_dis_auc': dis_auc, f"{split}_dis_ls": val_dis_cls_losses.avg})
 
-                if self.region_cls:
+                if self.region_cls and split != 'test':
                     # note in multi-gpu training, results should be reported in 1-gpu test
                     # or gather data from different rank
                     region_auc = calculate_auc(preds=region_preds.numpy(), targets=region_targets.long().numpy())

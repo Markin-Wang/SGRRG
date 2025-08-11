@@ -186,13 +186,13 @@ def config():
 
 
 @ex.named_config
-def task_train_caption_iu():
+def task_test_caption_iu():
     exp_name = 'iu_test'
     dataset_name = 'iu_xray'
-    max_seq_length = 60
-    threshold = 3
-    batch_size = 8
-    epochs = 40
+    max_seq_length = 100
+    threshold = 10
+    batch_size = 16
+    epochs = 1
     lr_base = 1e-3
     mul_new = 2
     img_backbone = 'swin_base_patch4_window7_224_in22k'
@@ -200,6 +200,9 @@ def task_train_caption_iu():
     ed_name = 'st_trans'
     seed = 9223
     use_amp = True
+    resolution_before = 224
+    image_size = 224
+    d_vf = 1024
 
 
 @ex.named_config

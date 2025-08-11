@@ -147,7 +147,10 @@ class R2DataLoader(DataLoader):
         keys = ['img_id', 'image', 'text', 'mask', 'seq_length']  # data used
 
         if 'boxes' in batch[0].keys():
-            keys.extend(['box_labels', 'boxes', 'box_abnormal_labels'])
+            keys.extend(['box_labels', 'boxes'])
+
+        if 'box_abnormal_labels' in batch[0].keys():
+            keys.extend(['box_abnormal_labels'])
 
         if 'region_labels' in batch[0].keys():
             keys.extend(['region_labels'])
@@ -185,7 +188,7 @@ class R2DataLoader(DataLoader):
 
         if 'boxes' in batch[0].keys():
             boxes, labels = batch_dict['boxes'], batch_dict['box_labels']
-            box_abnormal_labels = batch_dict['box_abnormal_labels']
+            box_abnormal_labels = batch_dict['box_abnormal_labels'] if 'box_abnormal_labels' in batch_dict else [[]*len(boxes)]
             boxes_, labels_, box_abnormal_labels_ = [], [], []
             for i, (box, label, box_abnormal_label) in enumerate(zip(boxes, labels, box_abnormal_labels)):
                 num_box = len(box)
@@ -198,7 +201,9 @@ class R2DataLoader(DataLoader):
 
             batch_dict['boxes'] = torch.cat(boxes_, dim=0)
             batch_dict['box_labels'] = torch.cat(labels_, dim=0)
-            batch_dict['box_abnormal_labels'] = torch.cat(box_abnormal_labels_, dim=0)
+            if 'box_abnormal_labels' in batch_dict:
+                batch_dict['box_abnormal_labels'] = torch.cat(box_abnormal_labels_)
+
 
         if 'region_labels' in batch[0].keys():
             batch_dict['region_labels'] = torch.cat(batch_dict['region_labels'], dim=0)

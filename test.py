@@ -77,12 +77,17 @@ def main(_config):
     # create tokenizer
 
     # create data loader
-    train_dataloader = R2DataLoader(_config, None, split='train', shuffle=True)
+    config2 = copy.deepcopy(_config)
+    config2['dataset_name'] = 'cxr_gnome'
+
+    train_dataloader = R2DataLoader(config2, None, split='train', shuffle=True)
     tokenizer = train_dataloader.dataset.tokenizer  # remember to delete the old vocab when new one
     all_texts = train_dataloader.dataset.all_texts
     _config['vocab_size'] = tokenizer.get_vocab_size()
 
-    val_dataloader = R2DataLoader(_config, tokenizer, split='val', shuffle=False)
+    # val_dataloader = R2DataLoader(_config, tokenizer, split='val', shuffle=False)
+    val_dataloader = None
+    _config['max_seq_length'] = 60
     test_dataloader = R2DataLoader(_config, tokenizer, split='test', shuffle=False)
 
 

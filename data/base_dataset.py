@@ -37,8 +37,12 @@ class BaseDatasetArrow(Dataset):
         self.dataset_name = config['dataset_name']
         self.att_cls = config['att_cls']
         self.region_cls = config['region_cls']
+        self.use_fg = config['use_sg']
         self.dsr = config['dsr']  # down sample rate
-        root = os.path.join(config['data_dir'], config['dataset_name'])
+        if self.dataset_name == 'iu_xray':
+            root = os.path.join(config['data_dir'], config['dataset_name'] + '_kaggle')
+        else:
+            root = os.path.join(config['data_dir'], config['dataset_name'])
         self.table = pa.ipc.RecordBatchFileReader(pa.memory_map(f"{root}/{name}.arrow", "r")).read_all()
         self.num_attributes = config['num_attributes']
         self.name2label = {name: i for i, name in enumerate(categories)}  # ensure the label setting consistency
@@ -60,7 +64,7 @@ class BaseDatasetArrow(Dataset):
         if split == 'train':
             self.tokenizer = Tokenizer(config, self.all_texts)
 
-        if self.dataset_name != 'iu_xray' and self.region_cls:
+        if self.use_fg:
             # if self.split == 'train':
             # 159434 training images both in chest vg mimic-cxr training set
             # 113922 before in cgnome training set after 113480
@@ -102,7 +106,7 @@ class BaseDatasetArrow(Dataset):
             self.att_labels = self.attributes['annotations']
             self.att_cat_info = self.attributes['attribute_info']
 
-        if self.dis_cls:
+        if self.dis_cls and self.split != 'test':
             # perform disease classification
             disease_path = os.path.join(root, 'annotations', 'disease_labels.json')
             self.disease_anns = json.loads(open(disease_path, 'r').read())[split]
@@ -117,27 +121,29 @@ class BaseDatasetArrow(Dataset):
 
         iid = self.table['image_id'][index].as_py()
 
-        if 'iu_xray' in self.dataset_name:
-            image1 = self.get_raw_image(index, image_key='image1')
-            image2 = self.get_raw_image(index, image_key='image2')
-            image_tensor1 = [self.transform['norm_to_tensor'](self.transform['common_aug'](image1))]
-            image_tensor2 = [self.transform['norm_to_tensor'](self.transform['common_aug'](image2))]
-            image_tensor = torch.stack(image_tensor1 + image_tensor2, dim=0)
-        else:
-            image = self.get_raw_image(index, image_key=image_key)
-            if self.region_cls:
+        # if 'iu_xray' in self.dataset_name:
+        #     image1 = self.get_raw_image(index, image_key='image1')
+        #     image2 = self.get_raw_image(index, image_key='image2')
+        #     image_tensor1 = [self.transform['norm_to_tensor'](self.transform['common_aug'](image1))]
+        #     image_tensor2 = [self.transform['norm_to_tensor'](self.transform['common_aug'](image2))]
+        #     image_tensor = torch.stack(image_tensor1 + image_tensor2, dim=0)
+        # else:
+        image = self.get_raw_image(index, image_key=image_key)
+        if self.use_fg:
+            box_ann = self.get_box(iid)
+            bboxes = datapoints.BoundingBox(box_ann['bboxes'], format=datapoints.BoundingBoxFormat.XYXY,
+                                            spatial_size=box_ann['spatial_size']
+                                            )
+            image_tensor, box_ann = self.transform['common_aug'](image,
+                                                                 {"boxes": bboxes, "labels": box_ann['labels']})
+
+            image_tensor = self.transform['norm_to_tensor'](image_tensor)
+
+            if self.region_cls and self.split != 'test':
                 region_labels, region_abnormal_labels = self.get_region_label(image_id=iid)
                 return_dict.update({'region_labels': region_labels})
 
                 if self.att_cls:
-                    box_ann = self.get_box(iid)
-                    bboxes = datapoints.BoundingBox(box_ann['bboxes'], format=datapoints.BoundingBoxFormat.XYXY,
-                                                    spatial_size=box_ann['spatial_size']
-                                                    )
-                    image_tensor, box_ann = self.transform['common_aug'](image,
-                                                                         {"boxes": bboxes, "labels": box_ann['labels']})
-
-                    image_tensor = self.transform['norm_to_tensor'](image_tensor)
                     # box masks are used to determine which mask will be selected
                     # to perform scene graph embedding and attribute prediction
                     box_ann['box_masks'] = self.get_box_mask(box_ann['labels'], region_labels)
@@ -152,17 +158,18 @@ class BaseDatasetArrow(Dataset):
                         if self.split == 'train':
                             return_dict.update({'attribute_labels': att_info})
 
-                    box_ann['box_labels'] = box_ann.pop('labels')
-                    return_dict.update(box_ann)
-
-
-                else:
-                    image_tensor = self.transform['common_aug'](image)
-                    image_tensor = self.transform['norm_to_tensor'](image_tensor)
+                box_ann['box_labels'] = box_ann.pop('labels')
+                return_dict.update(box_ann)
 
             else:
+                box_ann['box_labels'] = box_ann.pop('labels')
+                return_dict.update(box_ann)
                 image_tensor = self.transform['common_aug'](image)
                 image_tensor = self.transform['norm_to_tensor'](image_tensor)
+
+        else:
+            image_tensor = self.transform['common_aug'](image)
+            image_tensor = self.transform['norm_to_tensor'](image_tensor)
 
         return_dict.update(
             {
@@ -236,7 +243,7 @@ class BaseDatasetArrow(Dataset):
         ret = dict()
         ret.update(self.get_image(index))
 
-        if self.dis_cls:
+        if self.dis_cls and self.split != 'test':
             ret.update({'disease_labels': self.get_disease_label(ret['img_id'])})
 
         txt = self.get_text(index)
@@ -330,6 +337,7 @@ class BaseDatasetArrow(Dataset):
             if inter_w * inter_h == 0:
                 continue
             if ann['area'] <= 0 or w < 1 or h < 1:
+                print(11111)
                 continue
             if ann['category_id'] not in self.cat_ids:
                 continue
