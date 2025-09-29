@@ -46,24 +46,14 @@ For `IU X-Ray`, you can download the dataset from [here](https://openi.nlm.nih.g
 
 For `Chest ImgGenome`, you can download the dataset from [here](https://physionet.org/content/chest-imagenome/1.0.0/), and our processed scene graph annotations and bounding box annotations from [here](https://physionet.org/content/chest-imagenome/1.0.0/).
 
-After downloading the datasets, put them in the directory `data`, and run 
+After downloading the datasets, put the in the directory `datasets`, and run 
 ```bash
 python3 serialize/cxr_gnome.py
 ```
-to transform the original image and annotations into the .arrow file.
+to transform the original image and annotations into the .arrow file. Put the processed annotations files in `datasets/cxr_gnome/annotations`
 
-## Pseudo Label Generation
-You can generate the pesudo label for each dataset by leveraging the automatic labeler  [ChexBert](https://github.com/stanfordmlgroup/CheXbert).
 
-We also provide the generated labels in the files directory.
-
-Our experiments were done on RTX A6000 card.
-
-## Train on IU X-Ray
-
-Run `bash run_iu.sh` to train a model on the IU X-Ray data.
-
-## Run on MIMIC-CXR
+## Run on Chest ImaGenome
 
 Run `bash run_mimic.sh` to train a model on the MIMIC-CXR data.
 
