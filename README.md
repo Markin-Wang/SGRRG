@@ -53,14 +53,17 @@ python3 serialize/cxr_gnome.py
 to transform the original image and annotations into the .arrow file. Put the processed annotations files in `datasets/cxr_gnome/annotations`
 
 
-## Run on Chest ImaGenome
+## Train on Chest ImaGenome
 
-Run `bash run_mimic.sh` to train a model on the MIMIC-CXR data.
+Run `sh scripts/run_cgnome` to train a model on the Chest ImaGenome data.
 
 ## Test on Chest ImaGenome
 
-Run `bash scripts/test_cgnome.sh` to train a model on the MIMIC-CXR data.
+Run `sh scripts/test_cgnome` to test a model on the Chest ImaGenome data.
 
 ## Acknowledgment
 Our project references the codes in the following repos. Thanks for their works and sharing.
 - [R2GenCMN](https://github.com/cuhksz-nlp/R2GenCMN)
+- [METER](https://github.com/zdou0830/METER)
+- [CAMANet](https://github.com/Markin-Wang/CAMANet)
+- [XPRONet](https://github.com/Markin-Wang/XProNet)
