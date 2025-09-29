@@ -20,9 +20,9 @@ from collections import defaultdict
 from .head import DiseaseHead
 
 
-class RRGModel(nn.Module):
+class SGRRGModel(nn.Module):
     def __init__(self, tokenizer, logger=None, config=None):
-        super(RRGModel, self).__init__()
+        super(SGRRGModel, self).__init__()
         self.config = config
         self.vis = config['vis']
         self.tokenizer = tokenizer

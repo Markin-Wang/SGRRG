@@ -139,8 +139,8 @@ class BaseDatasetArrow(Dataset):
 
             image_tensor = self.transform['norm_to_tensor'](image_tensor)
 
-            # if self.region_cls and self.split != 'test':
-            if self.region_cls:
+            if self.region_cls and self.split != 'test':
+            # if self.region_cls:
                 region_labels, region_abnormal_labels = self.get_region_label(image_id=iid)
                 return_dict.update({'region_labels': region_labels})
 
@@ -154,8 +154,8 @@ class BaseDatasetArrow(Dataset):
                         return_dict.update(att_info)
                     else:
                         # # name = 'attribute_label_dicts' if self.split == 'test' else 'attribute_label_dicts'
-                        # if self.split == 'test':
-                        #     return_dict.update({'attribute_label_dicts':att_info})
+                        if self.split == 'test':
+                            return_dict.update({'attribute_label_dicts':att_info})
                         # if self.split == 'train':
                         return_dict.update({'attribute_labels': att_info})
 

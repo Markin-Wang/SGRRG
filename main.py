@@ -10,7 +10,7 @@ from modules.metrics import compute_scores, CaptionScorer
 from modules.optimizers import build_optimizer, build_lr_scheduler
 from modules.trainer import Trainer
 from modules.loss import compute_loss
-from models.origin_model import RRGModel
+from models.origin_model import SGRRGModel
 from modules.utils import auto_resume_helper, load_checkpoint
 from modules.logger import create_logger
 import torch.distributed as dist
@@ -91,7 +91,7 @@ def main(_config):
     # dm = MTDataModule(_config, dist=True)
 
     # build model architecture
-    model = RRGModel(tokenizer, logger, _config)
+    model = SGRRGModel(tokenizer, logger, _config)
 
     if _config['scale_lr']:
         scale_lr(_config)
