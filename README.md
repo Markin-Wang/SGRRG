@@ -40,11 +40,11 @@ conda env create --name [env_name] --file env.yml
 You can download the trained models [here](https://drive.google.com/drive/folders/1iv_SNS6GGHKImLrFITdScMor4hvwin77?usp=sharing).
 
 ## Datasets
-We use two datasets (IU X-Ray and MIMIC-CXR) in our paper.
+We use two datasets (Chest ImaGenome and IU X-Ray) in our paper.
 
 For `IU X-Ray`, you can download the dataset from [here](https://openi.nlm.nih.gov/faq).
 
-For `MIMIC-CXR`, you can download the dataset from [here](https://physionet.org/content/mimic-cxr/2.0.0/).
+For `Chest ImgGenome`, you can download the dataset from [here](https://physionet.org/content/chest-imagenome/1.0.0/).
 
 After downloading the datasets, put them in the directory `data`.
 
