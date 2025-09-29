@@ -37,7 +37,7 @@ conda env create --name [env_name] --file env.yml
 
 
 ## Download Trained Models
-You can download the trained models [here]().
+You can download the trained models [here](https://drive.google.com/file/d/1Scc0rbk2MN4VNYvDrxrd1NCF2SV6uHsU/view?usp=drive_link).
 
 ## Datasets
 We use two datasets (Chest ImaGenome and IU X-Ray) in our paper.
