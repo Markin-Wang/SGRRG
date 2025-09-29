@@ -44,9 +44,13 @@ We use two datasets (Chest ImaGenome and IU X-Ray) in our paper.
 
 For `IU X-Ray`, you can download the dataset from [here](https://openi.nlm.nih.gov/faq).
 
-For `Chest ImgGenome`, you can download the dataset from [here](https://physionet.org/content/chest-imagenome/1.0.0/).
+For `Chest ImgGenome`, you can download the dataset from [here](https://physionet.org/content/chest-imagenome/1.0.0/), and our processed scene graph annotations and bounding box annotations from [here](https://physionet.org/content/chest-imagenome/1.0.0/).
 
-After downloading the datasets, put them in the directory `data`.
+After downloading the datasets, put them in the directory `data`, and run 
+```bash
+python3 serialize/cxr_gnome.py
+```
+to transform the original image and annotations into the .arrow file.
 
 ## Pseudo Label Generation
 You can generate the pesudo label for each dataset by leveraging the automatic labeler  [ChexBert](https://github.com/stanfordmlgroup/CheXbert).
