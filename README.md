@@ -25,8 +25,8 @@ If you use or extend our work, please cite our paper.
 ## Prerequisites
 
 The following packages are required to run the scripts:
-- [Python >= 3.6]
-- [PyTorch = 1.6]
+- [Python >= 3.8.10]
+- [PyTorch = 1.10.2]
 - [Torchvision]
 - [Pycocoevalcap]
 
