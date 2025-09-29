@@ -1,6 +1,6 @@
 # SGRRG
 
-[CMIG 2025] This is the official implementation of [CAMANet: Class Activation Map Guided Attention Network for Radiology Report Generation](https://www.sciencedirect.com/science/article/pii/S0895611125001533) accepted to  IEEE Journal of Biomedical and Health Informatics (J-BHI), 2024.
+[CMIG 2025] This is the official implementation of [CAMANet: Class Activation Map Guided Attention Network for Radiology Report Generation](https://www.sciencedirect.com/science/article/pii/S0895611125001533) accepted to  Computerized Medical Imaging and Graphics (CMIG), 2025.
 
 ## Abstract
 
