@@ -1,6 +1,6 @@
 # SGRRG
 
-[CMIG 2025] This is the official implementation of [CAMANet: Class Activation Map Guided Attention Network for Radiology Report Generation](https://www.sciencedirect.com/science/article/pii/S0895611125001533) accepted to  Computerized Medical Imaging and Graphics (CMIG), 2025.
+[CMIG 2025] This is the official implementation of [SGRRG: Leveraging radiology scene graphs for improved and abnormality-aware radiology report generation](https://www.sciencedirect.com/science/article/pii/S0895611125001533) accepted to  Computerized Medical Imaging and Graphics (CMIG), 2025.
 
 ## Abstract
 
@@ -37,14 +37,14 @@ conda env create --name [env_name] --file env.yml
 
 
 ## Download Trained Models
-You can download the trained models [here](https://drive.google.com/drive/folders/1iv_SNS6GGHKImLrFITdScMor4hvwin77?usp=sharing).
+You can download the trained models [here]().
 
 ## Datasets
 We use two datasets (Chest ImaGenome and IU X-Ray) in our paper.
 
 For `IU X-Ray`, you can download the dataset from [here](https://openi.nlm.nih.gov/faq).
 
-For `Chest ImgGenome`, you can download the dataset from [here](https://physionet.org/content/chest-imagenome/1.0.0/), and our processed scene graph annotations and bounding box annotations from [here](https://physionet.org/content/chest-imagenome/1.0.0/).
+For `Chest ImgGenome`, you can download the dataset from [here](https://physionet.org/content/chest-imagenome/1.0.0/), and our processed scene graph annotations and bounding box annotations from [here](https://drive.google.com/drive/folders/1fZgKffE5wOS0rIHc4J-eUhANCURfLOm9?usp=sharing).
 
 After downloading the datasets, put the in the directory `datasets`, and run 
 ```bash
@@ -57,9 +57,9 @@ to transform the original image and annotations into the .arrow file. Put the pr
 
 Run `bash run_mimic.sh` to train a model on the MIMIC-CXR data.
 
-## Test on MIMIC-CXR
+## Test on Chest ImaGenome
 
-Run `bash test_mimic.sh` to train a model on the MIMIC-CXR data.
+Run `bash scripts/test_cgnome.sh` to train a model on the MIMIC-CXR data.
 
 ## Acknowledgment
 Our project references the codes in the following repos. Thanks for their works and sharing.
